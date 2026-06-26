@@ -4,12 +4,11 @@ import type { VerifyContext, SellerRequest, SellerResponse } from '@antseed/node
 import { runVerify, type VerifyQuoteFn } from './verifier.js'
 import {
   ATTEST_PATH,
-  ATTEST_SERVICE_ID,
   CLAIM_HARDWARE_GENUINE,
+  VERIFIER_ID,
   computeReportData,
   decodeAttestRequestNonce,
   encodeAttestResponse,
-  type AttestRequestBody,
 } from './shared.js'
 
 const PEER = 'f'.repeat(40)
@@ -26,6 +25,8 @@ function makeCtx(
   const seen: { req?: SellerRequest; nonce?: Uint8Array } = {}
   const ctx: VerifyContext = {
     peerId,
+    verifierId: VERIFIER_ID,
+    attestPath: ATTEST_PATH,
     fetchFromSeller: async (req) => {
       const nonce = decodeAttestRequestNonce(req.body ?? new Uint8Array())
       seen.req = req
@@ -43,14 +44,12 @@ const stubQuote = (status: string, reportData: Uint8Array | null): VerifyQuoteFn
   async () => ({ status, reportData })
 
 describe('runVerify — happy path', () => {
-  it('issues an OpenAI-shaped POST to the attest service with a 32-byte nonce', async () => {
+  it('issues a POST to the reserved attest path with a 32-byte nonce', async () => {
     const { ctx, seen } = makeCtx(() => ok200(encodeAttestResponse(randomBytes(64))))
     await runVerify(ctx, stubQuote('UpToDate', computeReportData(randomBytes(32), PEER)))
     expect(seen.req?.method).toBe('POST')
     expect(seen.req?.path).toBe(ATTEST_PATH)
     expect(seen.req?.headers?.['content-type']).toBe('application/json')
-    const parsed = JSON.parse(new TextDecoder().decode(seen.req!.body!)) as AttestRequestBody
-    expect(parsed.model).toBe(ATTEST_SERVICE_ID)
     expect(seen.nonce?.length).toBe(32)
   })
 
@@ -130,6 +129,8 @@ describe('runVerify — failure paths (all return ok:false, never throw)', () =>
   it('fails when fetchFromSeller rejects', async () => {
     const ctx: VerifyContext = {
       peerId: PEER,
+      verifierId: VERIFIER_ID,
+      attestPath: ATTEST_PATH,
       fetchFromSeller: async () => { throw new Error('peer unreachable') },
     }
     const result = await runVerify(ctx, stubQuote('UpToDate', randomBytes(64)))

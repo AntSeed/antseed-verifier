@@ -1,7 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { AntseedVerifierPlugin, VerifyContext, VerifyResult } from '@antseed/node'
 import {
-  ATTEST_PATH,
   CLAIM_HARDWARE_GENUINE,
   NONCE_BYTES,
   VERIFIER_ID,
@@ -92,7 +91,7 @@ export async function runVerify(
   try {
     resp = await ctx.fetchFromSeller({
       method: 'POST',
-      path: ATTEST_PATH,
+      path: ctx.attestPath,
       headers: { 'content-type': 'application/json' },
       body: encodeAttestRequest(nonce),
     })
