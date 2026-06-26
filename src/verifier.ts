@@ -4,6 +4,7 @@ import {
   ATTEST_PATH,
   CLAIM_HARDWARE_GENUINE,
   NONCE_BYTES,
+  VERIFIER_ID,
   computeReportData,
   decodeAttestResponse,
   encodeAttestRequest,
@@ -144,7 +145,7 @@ export async function runVerify(
 
 const verifierPlugin: AntseedVerifierPlugin = {
   type: 'verifier',
-  name: '@refoundhq/antseed-verifier',
+  name: VERIFIER_ID,
   displayName: 'TEE attestation verifier (Intel TDX / DCAP)',
   version: '0.1.0',
   description: 'Verifies a seller runs in a genuine Intel TDX enclave: DCAP quote validated to Intel\'s root with an acceptable TCB, and report_data bound to a fresh nonce and the seller\'s peer id.',

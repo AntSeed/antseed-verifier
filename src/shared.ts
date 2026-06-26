@@ -8,21 +8,20 @@ import { createHash } from 'node:crypto'
  */
 
 /**
- * Service/model id the seller's prover advertises. The seller routes any request
- * whose JSON body `model`/`service` equals this to the prover; it is priced at 0
- * (free), so the seller skips the payment-channel / 402 handshake entirely.
+ * The advertised + pinned verifier id (also the seller-side prover's name).
+ * Hyphenated — no '@' or '/' — so capability strings satisfy PEER_CAPABILITY_PATTERN.
  */
-export const ATTEST_SERVICE_ID = '__antseed_tee_attest__'
+export const VERIFIER_ID = 'refoundhq-antseed-verifier'
 
 /** The single claim this SDK proves. */
-export const CLAIM_HARDWARE_GENUINE = '@refoundhq/antseed-verifier:hardware-genuine'
+export const CLAIM_HARDWARE_GENUINE = `${VERIFIER_ID}:hardware-genuine`
 
 /**
- * Path the buyer POSTs the attestation request to. OpenAI-shaped so it rides the
- * existing buyer<->seller comms like any inference call; the seller routes by the
- * body's `model` field, not the path.
+ * Reserved control-plane path the buyer's verifier reaches the seller's prover at.
+ * The prefix MUST match @antseed/node's ANTSEED_ATTEST_PATH; the seller dispatches it
+ * (before provider/service matching, free) to the prover whose name === VERIFIER_ID.
  */
-export const ATTEST_PATH = '/v1/chat/completions'
+export const ATTEST_PATH = `/_antseed/attest/${VERIFIER_ID}`
 
 /** Freshness nonce length, in bytes. Exactly fills half of report_data's preimage. */
 export const NONCE_BYTES = 32
@@ -56,10 +55,8 @@ export function computeReportData(nonce: Uint8Array, peerId: string): Buffer {
   return h.digest() // 64 bytes
 }
 
-/** Body the buyer sends to the attestation service. */
+/** Body the buyer sends to the prover. */
 export interface AttestRequestBody {
-  /** Always ATTEST_SERVICE_ID — selects the prover on the seller. */
-  model: string
   /** base64 of the 32-byte freshness nonce. */
   nonce: string
 }
@@ -77,10 +74,7 @@ export interface AttestResponseBody {
 }
 
 export function encodeAttestRequest(nonce: Uint8Array): Uint8Array {
-  const body: AttestRequestBody = {
-    model: ATTEST_SERVICE_ID,
-    nonce: Buffer.from(nonce).toString('base64'),
-  }
+  const body: AttestRequestBody = { nonce: Buffer.from(nonce).toString('base64') }
   return new TextEncoder().encode(JSON.stringify(body))
 }
 
