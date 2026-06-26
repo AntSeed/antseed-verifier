@@ -1,0 +1,33 @@
+{
+  "name": "@refoundhq/antseed-verifier",
+  "version": "0.1.0",
+  "description": "AntSeed TEE attestation SDK — buyer verifier (Intel TDX / DCAP) + seller prover. One claim: @refoundhq/antseed-verifier:hardware-genuine.",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@phala/dcap-qvl": "^0.5.2"
+  },
+  "devDependencies": {
+    "@antseed/node": "file:/Users/samhassan/Workspaces/antseed-refound/main/packages/node",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
