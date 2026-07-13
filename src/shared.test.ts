@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createHash, randomBytes } from 'node:crypto'
 import {
-  ATTEST_SERVICE_ID,
   NONCE_BYTES,
   computeReportData,
   decodeAttestRequestNonce,
@@ -9,7 +8,6 @@ import {
   encodeAttestRequest,
   encodeAttestResponse,
   normalizePeerId,
-  type AttestRequestBody,
 } from './shared.js'
 
 const PEER = 'a'.repeat(40)
@@ -49,19 +47,16 @@ describe('computeReportData', () => {
 })
 
 describe('attestation request codec', () => {
-  it('round-trips the nonce and targets the attest service', () => {
+  it('round-trips the nonce', () => {
     const nonce = randomBytes(NONCE_BYTES)
-    const body = encodeAttestRequest(nonce)
-    const parsed = JSON.parse(new TextDecoder().decode(body)) as AttestRequestBody
-    expect(parsed.model).toBe(ATTEST_SERVICE_ID)
-    expect(Buffer.from(decodeAttestRequestNonce(body)).equals(nonce)).toBe(true)
+    expect(Buffer.from(decodeAttestRequestNonce(encodeAttestRequest(nonce))).equals(nonce)).toBe(true)
   })
   it('rejects a missing nonce', () => {
-    const body = new TextEncoder().encode(JSON.stringify({ model: ATTEST_SERVICE_ID }))
+    const body = new TextEncoder().encode(JSON.stringify({}))
     expect(() => decodeAttestRequestNonce(body)).toThrow(/missing "nonce"/)
   })
   it('rejects a wrong-size nonce', () => {
-    const body = new TextEncoder().encode(JSON.stringify({ model: ATTEST_SERVICE_ID, nonce: Buffer.from([1, 2, 3]).toString('base64') }))
+    const body = new TextEncoder().encode(JSON.stringify({ nonce: Buffer.from([1, 2, 3]).toString('base64') }))
     expect(() => decodeAttestRequestNonce(body)).toThrow(/must be 32 bytes/)
   })
 })

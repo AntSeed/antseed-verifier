@@ -9,17 +9,13 @@ import {
 } from './shared.js'
 
 /**
- * SELLER half — an embedded prover (type:'prover'). The seller loads it via
- * `--verifiers` and the node dispatches reserved attestation requests here, BEFORE
- * provider/service matching and payment. It is NOT a provider — transparent to the
- * seller's inference providers. On each request it reads the buyer's nonce, generates
- * a fresh Intel TDX quote over report_data = SHA-512(nonce ‖ peerId), and returns it.
+ * Seller half — embedded prover (type:'prover'). On each attestation request it reads
+ * the buyer's nonce and returns a fresh Intel TDX quote over SHA-512(nonce ‖ peerId).
  * Runs only on a real TDX VM (quote generation needs configfs-tsm).
  */
 
-/** This node's peer id (EVM address, no 0x). Bound into the TDX report_data so the
- *  quote is attributable to THIS seller — read from a trusted source (set by the
- *  operator/launcher), never from a buyer-supplied value. */
+/** This node's peer id (EVM address, no 0x), bound into the report_data so the quote is
+ *  attributable to this seller. From a trusted env var, never a buyer-supplied value. */
 const PEER_ID_KEY = 'ANTSEED_TEE_PEER_ID'
 
 function json(statusCode: number, body: unknown): SellerResponse {

@@ -11,10 +11,8 @@ import {
 } from './shared.js'
 
 /**
- * BUYER half. Autonomous verifier: it reaches the seller over the existing comms
- * (ctx.fetchFromSeller), gathers a fresh TDX quote, verifies it with @phala/dcap-qvl
- * (pure JS, no native deps) and checks the report_data binding. Returns ONE claim:
- * @refoundhq/antseed-verifier:hardware-genuine.
+ * Buyer half. Fetches a fresh TDX quote from the seller, verifies it with @phala/dcap-qvl
+ * and checks the report_data binding. Returns one claim: hardware-genuine.
  */
 
 /**
@@ -32,11 +30,7 @@ export interface QuoteVerification {
   reportData: Uint8Array | null
 }
 
-/**
- * Seam for the cryptographic DCAP check. The default does the real verification;
- * tests inject a stub so the orchestration is exercised without a genuine quote
- * (the live signature/PCK/TCB path runs in the GCP e2e).
- */
+/** Injectable DCAP check — the default verifies for real; tests inject a stub. */
 export type VerifyQuoteFn = (
   quote: Uint8Array,
   collateral: unknown | undefined,
@@ -65,10 +59,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b))
 }
 
-/**
- * Core orchestration, with the DCAP check injectable for testing. The plugin's
- * verify() calls this with the default (real) verifier.
- */
+/** Core orchestration; the DCAP check is injectable for testing. */
 export async function runVerify(
   ctx: VerifyContext,
   verifyQuote: VerifyQuoteFn = defaultVerifyQuote,
