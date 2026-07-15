@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { sha256 } from '@noble/hashes/sha2.js'
 import { keccak_256 } from '@noble/hashes/sha3.js'
 
 /**
@@ -16,7 +15,7 @@ export const VERIFIER_ID = 'refoundhq-antseed-verifier'
 
 /**
  * A claim id is the verifier id namespaced by the capability id, e.g.
- * 'refoundhq-antseed-verifier:tee-tdx-genuine'. One claim per capability.
+ * 'refoundhq-antseed-verifier:seller-node-tee-genuine'. One claim per capability.
  */
 export function claimId(capId: string): string {
   return `${VERIFIER_ID}:${capId}`
@@ -63,34 +62,65 @@ export function computeReportData(nonce: Uint8Array, peerId: string): Buffer {
   return h.digest() // 64 bytes
 }
 
+/** The dependent capability whose own evidence is EXCLUDED from the bundle it signs over. */
+const SELLER_BOUND_CAP_ID = 'seller-bound'
+
+/**
+ * Canonical digest over the WHOLE attestation bundle — every cap's evidence entry
+ * EXCEPT seller-bound's own signature (it cannot sign over itself). Sorting by cap id
+ * makes both halves agree regardless of map iteration order; length-prefixing each
+ * entry (capId ‖ len(4 bytes BE) ‖ bytes) keeps the concatenation unambiguous so no
+ * cap can shift bytes across an entry boundary. One seller signature therefore covers
+ * the node quote AND the provider quote (and any future caps) together.
+ */
+export function bundleDigest(evidence: Record<string, Uint8Array>): Uint8Array {
+  const ids = Object.keys(evidence).filter((id) => id !== SELLER_BOUND_CAP_ID).sort()
+  const h = createHash('sha256')
+  for (const id of ids) {
+    const bytes = evidence[id]!
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(bytes.length, 0)
+    h.update(Buffer.from(id, 'utf8'))
+    h.update(len)
+    h.update(Buffer.from(bytes))
+  }
+  return new Uint8Array(h.digest())
+}
+
 /**
  * seller-bound preimage — the 32-byte digest the seller signs with its AntSeed
  * identity key:
  *
- *   keccak256( nonce(32) || sha256(tdxQuoteEvidence) || utf8(peerId) )
+ *   keccak256( nonce(32) || bundleDigest(32) || utf8(peerId) )
  *
- * Binds the seller's identity signature to THIS specific quote (via its evidence
- * hash), THIS nonce (freshness) and THIS peer id (identity), so nobody can pair a
- * seller's signature with a different quote or replay it. Defined here so both
- * halves compute the identical bytes.
+ * Binds the seller's identity signature to the ENTIRE bundle (via bundleDigest), THIS
+ * nonce (freshness) and THIS peer id (identity), so nobody can pair a seller's signature
+ * with different evidence or replay it. Defined here so both halves compute identical bytes.
  */
-export function sellerBoundPreimage(nonce: Uint8Array, quoteEvidence: Uint8Array, peerId: string): Uint8Array {
-  const qh = sha256(quoteEvidence)
+export function sellerBoundPreimage(nonce: Uint8Array, digest: Uint8Array, peerId: string): Uint8Array {
   const pid = new TextEncoder().encode(normalizePeerId(peerId))
-  const preimage = new Uint8Array(nonce.length + qh.length + pid.length)
+  const preimage = new Uint8Array(nonce.length + digest.length + pid.length)
   preimage.set(nonce, 0)
-  preimage.set(qh, nonce.length)
-  preimage.set(pid, nonce.length + qh.length)
+  preimage.set(digest, nonce.length)
+  preimage.set(pid, nonce.length + digest.length)
   return keccak_256(preimage)
 }
+
+/** Prefix of the config keys under which a prover exposes collected evidence to later collectors. */
+const EVIDENCE_KEY_PREFIX = 'evidence:'
 
 /**
  * Config key under which a prover exposes an already-collected capability's evidence
  * (base64) to LATER collectors in the same request. Lets a dependent capability
- * (seller-bound) read the tee-tdx evidence it must bind to, without provider specifics.
+ * (seller-bound) read the whole bundle it must bind to, without provider specifics.
  */
 export function evidenceConfigKey(capId: string): string {
-  return `evidence:${capId}`
+  return `${EVIDENCE_KEY_PREFIX}${capId}`
+}
+
+/** Inverse of evidenceConfigKey: the cap id an "evidence:<capId>" config key carries, else undefined. */
+export function parseEvidenceConfigKey(key: string): string | undefined {
+  return key.startsWith(EVIDENCE_KEY_PREFIX) ? key.slice(EVIDENCE_KEY_PREFIX.length) : undefined
 }
 
 /** Body the buyer sends to the prover: a fresh nonce + the menu of caps it wants. */

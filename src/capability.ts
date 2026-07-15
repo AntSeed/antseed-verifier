@@ -17,12 +17,18 @@ export interface CapabilityVerifyInput {
   /** This capability's own evidence bytes, if the seller returned any. */
   evidence?: Uint8Array
   /**
-   * The shared, already-DCAP-verified TDX quote (a ParsedTdxQuote from caps/tee-tdx).
-   * `unknown` here keeps this core module free of any cap-specific type; caps cast it.
+   * The already-DCAP-verified TDX quote this cap consumes (a ParsedTdxQuote from
+   * caps/tee-tdx). A TDX cap reads its own; a derived cap (measured-image) reads the
+   * quote it targets. `unknown` keeps this core module free of any cap-specific type.
    */
   parsedQuote?: unknown
   /** Buyer policy for this capability (e.g. approved measurements). Data, never fetched. */
   policy?: unknown
+  /**
+   * The full per-cap evidence map returned this round. seller-bound digests it (minus its
+   * own entry) to verify one seller signature covers the entire bundle.
+   */
+  evidenceBundle?: Record<string, Uint8Array>
 }
 
 /** Input to a capability's seller-side evidence collection. */

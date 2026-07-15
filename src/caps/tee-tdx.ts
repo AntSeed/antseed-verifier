@@ -5,15 +5,31 @@ import { generateTdxQuote } from '../collect/configfs.js'
 import { collectViaHttp } from '../collect/http.js'
 
 /**
- * Capability 'tee-tdx-genuine': proves the seller runs in a genuine Intel TDX enclave.
+ * A genuine-Intel-TDX capability: proves a party runs in a genuine Intel TDX enclave.
  * DCAP-verifies the quote (ECDSA sig + PCK chain to Intel's root + TCB), requires an
  * acceptable TCB, requires it is a TDX (TD10) quote, and requires TDX debug not enabled.
  * It ALSO parses out the authenticated measurements (MRTD, RTMR0-3, report_data) into a
- * shared ParsedTdxQuote so dependent caps (seller-bound, measured-image) reuse the exact
- * same verified quote instead of re-parsing untrusted bytes.
+ * shared ParsedTdxQuote so dependent caps (measured-image) reuse the exact same verified
+ * quote instead of re-parsing untrusted bytes.
+ *
+ * Two instances are minted from the ONE factory below (makeTdxCap), differing only by
+ * id + collector source + evidence key: the AntSeed seller NODE's own TEE (configfs), and
+ * the downstream inference PROVIDER's TEE (http). Same verify logic; independent evidence.
  */
 
-const CAP_ID = 'tee-tdx-genuine'
+/** The AntSeed seller node's own TEE (mints its quote locally via configfs). */
+export const NODE_TEE_CAP_ID = 'seller-node-tee-genuine'
+/** The downstream inference provider's TEE (quote fetched from the provider's evidence route). */
+export const PROVIDER_TEE_CAP_ID = 'seller-provider-tee-genuine'
+
+/**
+ * Config-key convention: each TDX cap reads its OWN collector settings from `<capId>.<key>`
+ * in the shared config map, so the node cap and the provider cap never collide. Kept in one
+ * place so the prover writes the same keys the factory reads.
+ */
+export function tdxConfigKey(id: string, key: string): string {
+  return `${id}.${key}`
+}
 
 /**
  * TCB statuses accepted as genuine hardware: current Intel platform TCB. SWHardeningNeeded
@@ -149,41 +165,54 @@ function hex(b: Uint8Array): string {
   return Buffer.from(b).toString('hex')
 }
 
-export const teeTdxCapability: Capability = {
-  id: CAP_ID,
+/**
+ * Mint one TDX capability. `id` names the target (node vs provider); `defaultSource`
+ * is the collector used when config supplies no `<id>.source` override:
+ *   'configfs': self-hosted TDX minted locally; report_data = SHA-512(nonce ‖ peerId)
+ *   'http'    : a pre-made quote fetched from a config-supplied evidence route ({nonce} hex)
+ * verify reads this cap's OWN parsed quote (the orchestrator DCAP-verifies each cap's
+ * own evidence entry independently). collect throws when its source is unavailable
+ * (off-TEE for configfs, or no url for http), so the prover simply omits the cap.
+ */
+export function makeTdxCap(id: string, defaultSource: 'configfs' | 'http'): Capability {
+  return {
+    id,
 
-  verify(input: CapabilityVerifyInput): ClaimResult {
-    const claim = claimId(CAP_ID)
-    if (!input.evidence) return { claim, ok: false, detail: 'seller returned no tee-tdx quote' }
-    const p = input.parsedQuote as ParsedTdxQuote | undefined
-    if (!p) return { claim, ok: false, detail: 'tee-tdx quote was not verified' }
-    if (p.error) return { claim, ok: false, detail: p.error }
-    if (!ACCEPTABLE_TCB.has(p.status)) return { claim, ok: false, detail: `TCB status not acceptable: ${p.status || 'unknown'}` }
-    if (!p.td) return { claim, ok: false, detail: 'quote is not an Intel TDX quote' }
-    if (p.td.debug === true) return { claim, ok: false, detail: 'TDX debug mode is enabled' }
-    return {
-      claim,
-      ok: true,
-      detail: `genuine Intel TDX quote (TCB ${p.status}); MRTD ${hex(p.td.mrTd).slice(0, 16)}…`,
-    }
-  },
+    verify(input: CapabilityVerifyInput): ClaimResult {
+      const claim = claimId(id)
+      if (!input.evidence) return { claim, ok: false, detail: 'seller returned no TDX quote' }
+      const p = input.parsedQuote as ParsedTdxQuote | undefined
+      if (!p) return { claim, ok: false, detail: 'TDX quote was not verified' }
+      if (p.error) return { claim, ok: false, detail: p.error }
+      if (!ACCEPTABLE_TCB.has(p.status)) return { claim, ok: false, detail: `TCB status not acceptable: ${p.status || 'unknown'}` }
+      if (!p.td) return { claim, ok: false, detail: 'quote is not an Intel TDX quote' }
+      if (p.td.debug === true) return { claim, ok: false, detail: 'TDX debug mode is enabled' }
+      return {
+        claim,
+        ok: true,
+        detail: `genuine Intel TDX quote (TCB ${p.status}); MRTD ${hex(p.td.mrTd).slice(0, 16)}…`,
+      }
+    },
 
-  /**
-   * Mint fresh evidence. `config.source` selects the generic collector:
-   *   'configfs' (default): self-hosted TDX; report_data = SHA-512(nonce ‖ peerId)
-   *   'http': fetch a pre-made quote from a config-supplied endpoint
-   * Throws when the chosen source is unavailable, so the prover simply omits the cap.
-   */
-  async collect(input: CapabilityCollectInput): Promise<Uint8Array> {
-    const source = input.config.source ?? 'configfs'
-    if (source === 'configfs') {
-      const quote = generateTdxQuote(computeReportData(input.nonce, input.peerId))
-      return encodeTeeTdxEvidence(quote)
-    }
-    if (source === 'http') {
-      const quote = await collectViaHttp(input.config, input.nonce)
-      return encodeTeeTdxEvidence(quote)
-    }
-    throw new Error(`unknown tee-tdx source "${source}" (expected "configfs" or "http")`)
-  },
+    async collect(input: CapabilityCollectInput): Promise<Uint8Array> {
+      const source = input.config[tdxConfigKey(id, 'source')] ?? defaultSource
+      if (source === 'configfs') {
+        const quote = generateTdxQuote(computeReportData(input.nonce, input.peerId))
+        return encodeTeeTdxEvidence(quote)
+      }
+      if (source === 'http') {
+        const url = input.config[tdxConfigKey(id, 'url')]
+        if (!url) throw new Error(`${id} http source requires an evidence url; not offered`)
+        const field = input.config[tdxConfigKey(id, 'field')] ?? 'quote'
+        const quote = await collectViaHttp(url, input.nonce, field)
+        return encodeTeeTdxEvidence(quote)
+      }
+      throw new Error(`unknown ${id} source "${source}" (expected "configfs" or "http")`)
+    },
+  }
 }
+
+/** The AntSeed seller NODE's own TEE — mints its quote locally via configfs. */
+export const nodeTeeCapability = makeTdxCap(NODE_TEE_CAP_ID, 'configfs')
+/** The downstream inference PROVIDER's TEE — quote fetched from the provider's evidence route. */
+export const providerTeeCapability = makeTdxCap(PROVIDER_TEE_CAP_ID, 'http')

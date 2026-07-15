@@ -4,7 +4,7 @@ import { measuredImageCapability, type MeasuredImagePolicy } from './measured-im
 import type { ParsedTdxQuote, TdMeasurements } from './tee-tdx.js'
 import { claimId } from '../shared.js'
 
-const CLAIM = claimId('measured-image')
+const CLAIM = claimId('seller-provider-measured-image')
 const NONCE = randomBytes(32)
 const PEER = 'f'.repeat(40)
 

@@ -2,7 +2,14 @@ import { randomBytes } from 'node:crypto'
 import type { AntseedVerifierPlugin, ClaimResult, VerifyContext, VerifyResult } from '@antseed/node'
 import './caps/index.js' // side-effect: register the capability menu
 import { capabilityIds, getCapability } from './capability.js'
-import { defaultVerifyQuote, verifyTdxEvidence, type ParsedTdxQuote, type VerifyQuoteFn } from './caps/tee-tdx.js'
+import {
+  NODE_TEE_CAP_ID,
+  PROVIDER_TEE_CAP_ID,
+  defaultVerifyQuote,
+  verifyTdxEvidence,
+  type ParsedTdxQuote,
+  type VerifyQuoteFn,
+} from './caps/tee-tdx.js'
 import {
   NONCE_BYTES,
   VERIFIER_ID,
@@ -19,15 +26,27 @@ import {
  * evidenced are reported as informational claims.
  */
 
+/** measured-image derives from (targets) the provider quote; it has no own evidence. */
+const MEASURED_IMAGE_ID = 'seller-provider-measured-image'
+const SELLER_BOUND_ID = 'seller-bound'
+
 /**
  * The caps that MUST pass for ok=true. @antseed/node's VerifyContext carries no buyer
- * config yet, so this is a fixed default: genuine TDX hardware AND seller-identity binding.
- * Everything else (measured-image, gpu) is informational until buyers can pass policy.
+ * config yet, so this is a fixed default: the seller NODE's genuine TDX hardware AND the
+ * seller-identity binding. The provider TEE, measured-image and gpu are informational
+ * (the provider TEE is optional; measured-image needs a buyer policy to pass).
  */
-const REQUIRED_CAPS = ['tee-tdx-genuine', 'seller-bound']
-const TEE_TDX_ID = 'tee-tdx-genuine'
-/** Derived cap (no own evidence): always worth reporting when a TDX quote is present. */
-const DERIVED_CAPS = ['measured-image']
+const REQUIRED_CAPS = [NODE_TEE_CAP_ID, SELLER_BOUND_ID]
+/** The TDX caps whose own evidence is DCAP-verified independently into a per-cap parse. */
+const TDX_CAP_IDS = [NODE_TEE_CAP_ID, PROVIDER_TEE_CAP_ID]
+/** Derived cap (no own evidence): always worth reporting; verifies the provider quote. */
+const DERIVED_CAPS = [MEASURED_IMAGE_ID]
+/** Which TDX parse each cap's verify consumes (TDX caps read their own; measured-image the provider). */
+const PARSE_SOURCE: Record<string, string> = {
+  [NODE_TEE_CAP_ID]: NODE_TEE_CAP_ID,
+  [PROVIDER_TEE_CAP_ID]: PROVIDER_TEE_CAP_ID,
+  [MEASURED_IMAGE_ID]: PROVIDER_TEE_CAP_ID,
+}
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -77,11 +96,12 @@ export async function runVerify(
     return failAll(`malformed attestation response: ${msg(err)}`)
   }
 
-  // DCAP-verify the tee-tdx quote once; share the parsed result with every dependent cap.
-  let parsed: ParsedTdxQuote | undefined
-  const teeEv = evidence[TEE_TDX_ID]
-  if (teeEv) {
-    parsed = await verifyTdxEvidence(teeEv, verifyQuote, Math.floor(Date.now() / 1000))
+  // DCAP-verify each TDX cap's OWN evidence independently; share each parse with its dependents.
+  const now = Math.floor(Date.now() / 1000)
+  const parsedByCap = new Map<string, ParsedTdxQuote>()
+  for (const id of TDX_CAP_IDS) {
+    const ev = evidence[id]
+    if (ev) parsedByCap.set(id, await verifyTdxEvidence(ev, verifyQuote, now))
   }
 
   // Verify the required caps, any cap the seller returned evidence for, and derived caps.
@@ -91,8 +111,10 @@ export async function runVerify(
     if (!wanted.has(capId)) continue
     const cap = getCapability(capId)
     if (!cap) continue
+    const source = PARSE_SOURCE[capId]
+    const parsed = source ? parsedByCap.get(source) : undefined
     try {
-      claims.push(await cap.verify({ nonce, peerId, evidence: evidence[capId], parsedQuote: parsed }))
+      claims.push(await cap.verify({ nonce, peerId, evidence: evidence[capId], parsedQuote: parsed, evidenceBundle: evidence }))
     } catch (err) {
       claims.push({ claim: claimId(capId), ok: false, detail: `verify threw: ${msg(err)}` })
     }
@@ -108,7 +130,7 @@ const verifierPlugin: AntseedVerifierPlugin = {
   displayName: 'TEE attestation verifier (Intel TDX / DCAP)',
   version: '0.1.0',
   description:
-    'Capability-based seller attestation: one claim per capability. Requires genuine Intel TDX hardware (tee-tdx-genuine) and a seller-identity binding (seller-bound); also reports measured-image and gpu-nvidia-cc when available.',
+    'Capability-based seller attestation: one claim per capability. Requires the seller node\'s genuine Intel TDX hardware (seller-node-tee-genuine) and a seller-identity binding over the whole bundle (seller-bound); also reports the provider TEE (seller-provider-tee-genuine), measured-image and gpu-cc when available.',
   verify: (ctx) => runVerify(ctx),
 }
 

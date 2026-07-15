@@ -4,14 +4,15 @@ import type { ParsedTdxQuote } from './tee-tdx.js'
 import { claimId } from '../shared.js'
 
 /**
- * Capability 'measured-image': proves the seller booted a specific, approved software
- * image, by comparing the TDX quote's authenticated measurements (MRTD + RTMR0-3) to a
- * buyer-supplied allow-list. The approved measurements are pure DATA passed in via policy
- * — never fetched, never hardcoded — so the SDK stays provider-agnostic. With no policy it
- * returns ok:false; it never passes by default. Derives from tee-tdx, so it has no own evidence.
+ * Capability 'seller-provider-measured-image': proves the inference PROVIDER booted a
+ * specific, approved software image, by comparing the provider TDX quote's authenticated
+ * measurements (MRTD + RTMR0-3) to a buyer-supplied allow-list. The approved measurements
+ * are pure DATA passed in via policy — never fetched, never hardcoded — so the SDK stays
+ * provider-agnostic. With no policy it returns ok:false; it never passes by default.
+ * Derives from the provider quote, so it has no own evidence.
  */
 
-const CAP_ID = 'measured-image'
+const CAP_ID = 'seller-provider-measured-image'
 
 /** One approved image fingerprint. Hex strings (no 0x); rtmrN optional (checked when present). */
 export interface ApprovedMeasurement {

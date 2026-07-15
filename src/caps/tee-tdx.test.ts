@@ -1,17 +1,31 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { randomBytes } from 'node:crypto'
+
+// Stub the configfs collector so the node cap's collect runs off-TEE: echo the report_data
+// back as the "quote" so we can assert the nonce+peer binding the collector applied.
+vi.mock('../collect/configfs.js', () => ({
+  generateTdxQuote: (reportData: Uint8Array) => reportData,
+}))
+
 import {
+  NODE_TEE_CAP_ID,
+  PROVIDER_TEE_CAP_ID,
+  decodeTeeTdxEvidence,
   encodeTeeTdxEvidence,
-  teeTdxCapability,
+  nodeTeeCapability,
+  providerTeeCapability,
+  tdxConfigKey,
   verifyTdxEvidence,
   type TdMeasurements,
   type VerifyQuoteFn,
 } from './tee-tdx.js'
-import { claimId } from '../shared.js'
+import type { Capability } from '../capability.js'
+import { claimId, computeReportData } from '../shared.js'
 
 const NONCE = randomBytes(32)
 const PEER = 'f'.repeat(40)
-const CLAIM = claimId('tee-tdx-genuine')
+
+afterEach(() => vi.unstubAllGlobals())
 
 /** A plausible TD10 measurement set; override fields per test. */
 function td(over: Partial<TdMeasurements> = {}): TdMeasurements {
@@ -28,56 +42,100 @@ function td(over: Partial<TdMeasurements> = {}): TdMeasurements {
 }
 
 /** Run verifyTdxEvidence (stubbed DCAP) then the cap's policy check, as the orchestrator does. */
-async function run(stub: VerifyQuoteFn, evidence = encodeTeeTdxEvidence(randomBytes(64))) {
+async function run(cap: Capability, stub: VerifyQuoteFn, evidence = encodeTeeTdxEvidence(randomBytes(64))) {
   const parsed = await verifyTdxEvidence(evidence, stub, Math.floor(Date.now() / 1000))
-  return teeTdxCapability.verify({ nonce: NONCE, peerId: PEER, evidence, parsedQuote: parsed })
+  return cap.verify({ nonce: NONCE, peerId: PEER, evidence, parsedQuote: parsed })
 }
 
-describe('tee-tdx-genuine capability', () => {
+// The verify logic is shared by both caps (one factory); exercise it via the node cap.
+describe('TDX cap verify (seller-node-tee-genuine)', () => {
+  const CLAIM = claimId(NODE_TEE_CAP_ID)
+
   it('passes on acceptable TCB + TDX quote + debug off', async () => {
-    const r = await run(async () => ({ status: 'UpToDate', td: td() }))
+    const r = await run(nodeTeeCapability, async () => ({ status: 'UpToDate', td: td() }))
     expect(r).toMatchObject({ claim: CLAIM, ok: true })
     expect(r.detail).toMatch(/genuine Intel TDX quote/)
   })
 
   it('accepts SWHardeningNeeded', async () => {
-    expect((await run(async () => ({ status: 'SWHardeningNeeded', td: td() }))).ok).toBe(true)
+    expect((await run(nodeTeeCapability, async () => ({ status: 'SWHardeningNeeded', td: td() }))).ok).toBe(true)
   })
 
   it('rejects an unacceptable TCB status', async () => {
-    const r = await run(async () => ({ status: 'OutOfDate', td: td() }))
+    const r = await run(nodeTeeCapability, async () => ({ status: 'OutOfDate', td: td() }))
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/TCB status not acceptable: OutOfDate/)
   })
 
   it('rejects a non-TDX quote', async () => {
-    const r = await run(async () => ({ status: 'UpToDate', td: null }))
+    const r = await run(nodeTeeCapability, async () => ({ status: 'UpToDate', td: null }))
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/not an Intel TDX quote/)
   })
 
   it('rejects a debug-enabled TD', async () => {
-    const r = await run(async () => ({ status: 'UpToDate', td: td({ debug: true }) }))
+    const r = await run(nodeTeeCapability, async () => ({ status: 'UpToDate', td: td({ debug: true }) }))
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/debug mode is enabled/)
   })
 
   it('fails (never throws) when DCAP verification throws', async () => {
-    const r = await run(async () => { throw new Error('bad signature') })
+    const r = await run(nodeTeeCapability, async () => { throw new Error('bad signature') })
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/quote verification failed: bad signature/)
   })
 
   it('fails on malformed evidence', async () => {
-    const r = await run(async () => ({ status: 'UpToDate', td: td() }), new TextEncoder().encode('not json'))
+    const r = await run(nodeTeeCapability, async () => ({ status: 'UpToDate', td: td() }), new TextEncoder().encode('not json'))
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/malformed tee-tdx evidence/)
   })
 
-  it('fails when the seller returned no tee-tdx evidence', () => {
-    const r = teeTdxCapability.verify({ nonce: NONCE, peerId: PEER })
+  it('fails when the seller returned no quote', () => {
+    const r = nodeTeeCapability.verify({ nonce: NONCE, peerId: PEER })
     expect(r).toMatchObject({ claim: CLAIM, ok: false })
-    expect((r as { detail: string }).detail).toMatch(/no tee-tdx quote/)
+    expect((r as { detail: string }).detail).toMatch(/no TDX quote/)
+  })
+})
+
+// Both caps come from the same factory but carry distinct ids + independent evidence.
+describe('two TDX caps from one factory', () => {
+  it('the provider cap verifies to its own distinct claim id', async () => {
+    const r = await run(providerTeeCapability, async () => ({ status: 'UpToDate', td: td() }))
+    expect(r).toMatchObject({ claim: claimId(PROVIDER_TEE_CAP_ID), ok: true })
+    expect(nodeTeeCapability.id).toBe('seller-node-tee-genuine')
+    expect(providerTeeCapability.id).toBe('seller-provider-tee-genuine')
+  })
+})
+
+describe('seller-node-tee-genuine collect (configfs, stubbed)', () => {
+  it('mints a quote bound to report_data = SHA-512(nonce ‖ peerId)', async () => {
+    const ev = await nodeTeeCapability.collect!({ nonce: NONCE, peerId: PEER, config: {} })
+    const { quote } = decodeTeeTdxEvidence(ev)
+    // The stub echoes report_data as the quote — assert the collector bound nonce + peer.
+    expect(Buffer.from(quote).equals(computeReportData(NONCE, PEER))).toBe(true)
+  })
+})
+
+describe('seller-provider-tee-genuine collect (http, stubbed fetch)', () => {
+  it('fetches the {nonce}-hex route and extracts the base64 quote at FIELD', async () => {
+    const quoteBytes = randomBytes(96)
+    let seenUrl = ''
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seenUrl = url
+      return { ok: true, json: async () => ({ quote: Buffer.from(quoteBytes).toString('base64') }) }
+    }))
+    const config = {
+      [tdxConfigKey(PROVIDER_TEE_CAP_ID, 'url')]: 'https://provider.example/evidence/{nonce}',
+      [tdxConfigKey(PROVIDER_TEE_CAP_ID, 'field')]: 'quote',
+    }
+    const ev = await providerTeeCapability.collect!({ nonce: NONCE, peerId: PEER, config })
+    expect(seenUrl).toBe(`https://provider.example/evidence/${Buffer.from(NONCE).toString('hex')}`)
+    expect(Buffer.from(decodeTeeTdxEvidence(ev).quote).equals(quoteBytes)).toBe(true)
+  })
+
+  it('is not offered (throws) when no provider evidence url is configured', async () => {
+    await expect(providerTeeCapability.collect!({ nonce: NONCE, peerId: PEER, config: {} })).rejects.toThrow(/requires an evidence url/)
   })
 })
 

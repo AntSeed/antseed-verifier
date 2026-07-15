@@ -2,6 +2,7 @@ import type { Prover, SellerRequest, SellerResponse } from '@antseed/node'
 import './caps/index.js' // side-effect: register the capability menu
 import { listCapabilities } from './capability.js'
 import { evmAddressFromPrivateKey, signerFromPrivateKey } from './caps/seller-bound.js'
+import { NODE_TEE_CAP_ID, PROVIDER_TEE_CAP_ID, tdxConfigKey } from './caps/tee-tdx.js'
 import {
   VERIFIER_ID,
   decodeAttestRequest,
@@ -17,17 +18,19 @@ import {
  * differences are handled purely by config (no provider specifics live here).
  *
  * Env config:
- *   ANTSEED_TEE_PEER_ID          this node's peer id (EVM address, no 0x) — required
- *   ANTSEED_VERIFIER_SOURCE      tee-tdx quote source: "configfs" (default) | "http"
- *   ANTSEED_VERIFIER_URL         http source: attestation endpoint ({nonce}/{nonce_b64} ok)
- *   ANTSEED_VERIFIER_FIELD       http source: JSON dot-path to the base64 quote
- *   ANTSEED_VERIFIER_METHOD      http source: override HTTP method
- *   ANTSEED_VERIFIER_BODY        http source: request body template
- *   ANTSEED_VERIFIER_SIGNING_KEY seller identity private key (hex) for seller-bound
+ *   ANTSEED_TEE_PEER_ID                    this node's peer id (EVM address, no 0x) — required
+ *   ANTSEED_VERIFIER_NODE_TEE              seller-node-tee-genuine source: "configfs" (default)
+ *   ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL provider evidence route (with a {nonce} hex placeholder);
+ *                                          when set, seller-provider-tee-genuine is offered via http
+ *   ANTSEED_VERIFIER_PROVIDER_TEE_FIELD    JSON field holding the base64 provider quote (default "quote")
+ *   ANTSEED_VERIFIER_SIGNING_KEY           seller identity private key (hex) for seller-bound
  */
 
 const PEER_ID_KEY = 'ANTSEED_TEE_PEER_ID'
 const SIGNING_KEY = 'ANTSEED_VERIFIER_SIGNING_KEY'
+const NODE_TEE_SOURCE = 'ANTSEED_VERIFIER_NODE_TEE'
+const PROVIDER_EVIDENCE_URL = 'ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL'
+const PROVIDER_TEE_FIELD = 'ANTSEED_VERIFIER_PROVIDER_TEE_FIELD'
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -41,18 +44,22 @@ function json(statusCode: number, body: unknown): SellerResponse {
   }
 }
 
-/** Generic, provider-neutral collector config assembled from ANTSEED_VERIFIER_* env vars. */
+/**
+ * Generic, provider-neutral collector config, namespaced per TDX cap so the node cap and
+ * the provider cap never collide. The node cap defaults to a local configfs quote; the
+ * provider cap is offered (via http) only when a provider evidence URL is configured.
+ */
 function baseConfig(): Record<string, string> {
   const cfg: Record<string, string> = {}
-  const put = (key: string, envKey: string): void => {
-    const v = process.env[envKey]?.trim()
-    if (v) cfg[key] = v
+  // seller-node-tee-genuine: mint the quote locally; default to configfs when unset.
+  cfg[tdxConfigKey(NODE_TEE_CAP_ID, 'source')] = process.env[NODE_TEE_SOURCE]?.trim() || 'configfs'
+  // seller-provider-tee-genuine: only offered when a provider evidence route is configured.
+  const provUrl = process.env[PROVIDER_EVIDENCE_URL]?.trim()
+  if (provUrl) {
+    cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'source')] = 'http'
+    cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'url')] = provUrl
+    cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'field')] = process.env[PROVIDER_TEE_FIELD]?.trim() || 'quote'
   }
-  put('source', 'ANTSEED_VERIFIER_SOURCE')
-  put('url', 'ANTSEED_VERIFIER_URL')
-  put('field', 'ANTSEED_VERIFIER_FIELD')
-  put('method', 'ANTSEED_VERIFIER_METHOD')
-  put('body', 'ANTSEED_VERIFIER_BODY')
   return cfg
 }
 

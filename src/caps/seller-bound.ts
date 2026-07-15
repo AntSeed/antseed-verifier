@@ -3,20 +3,19 @@ import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { keccak_256 } from '@noble/hashes/sha3.js'
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
 import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '../capability.js'
-import type { ParsedTdxQuote } from './tee-tdx.js'
-import { claimId, evidenceConfigKey, normalizePeerId, sellerBoundPreimage } from '../shared.js'
+import { bundleDigest, claimId, normalizePeerId, parseEvidenceConfigKey, sellerBoundPreimage } from '../shared.js'
 
 /**
  * Capability 'seller-bound': turns provider verification into SELLER verification. The
- * seller signs the seller-bound preimage (keccak256 over nonce ‖ sha256(tdx evidence) ‖
- * peerId) with its AntSeed identity key. The buyer recovers the signer's EVM address and
- * requires it to equal the peer id. Freshness (nonce) + identity (peerId) live entirely
- * here, independent of what the quote's own report_data binds — so it works even when the
- * TDX quote binds a provider key rather than the seller's peer id.
+ * seller signs the seller-bound preimage (keccak256 over nonce ‖ bundleDigest ‖ peerId)
+ * with its AntSeed identity key, where bundleDigest covers EVERY other cap's evidence
+ * (the node quote AND the provider quote together). The buyer recovers the signer's EVM
+ * address and requires it to equal the peer id. Freshness (nonce) + identity (peerId)
+ * live entirely here, independent of what any quote's own report_data binds — so one
+ * seller signature ties the whole bundle to this seller and this round.
  */
 
 const CAP_ID = 'seller-bound'
-const TEE_TDX_ID = 'tee-tdx-genuine'
 
 /** Recover the 40-hex (lowercase, no 0x) EVM address that produced an r‖s‖v signature. */
 export function recoverEvmAddress(digest: Uint8Array, sig: Uint8Array): string {
@@ -59,15 +58,19 @@ export const sellerBoundCapability: Capability = {
   verify(input: CapabilityVerifyInput): ClaimResult {
     const claim = claimId(CAP_ID)
     if (!input.evidence) return { claim, ok: false, detail: 'seller returned no identity signature' }
-    const p = input.parsedQuote as ParsedTdxQuote | undefined
-    if (!p) return { claim, ok: false, detail: 'seller-bound requires a tee-tdx quote to bind to' }
+    const bundle = input.evidenceBundle
+    if (!bundle) return { claim, ok: false, detail: 'seller-bound requires the evidence bundle to bind to' }
+    // bundleDigest excludes seller-bound's own entry; require at least one other cap to cover.
+    if (Object.keys(bundle).filter((id) => id !== CAP_ID).length === 0) {
+      return { claim, ok: false, detail: 'seller-bound has no other evidence to bind to' }
+    }
     let peerId: string
     try {
       peerId = normalizePeerId(input.peerId)
     } catch (err) {
       return { claim, ok: false, detail: err instanceof Error ? err.message : String(err) }
     }
-    const preimage = sellerBoundPreimage(input.nonce, p.quoteEvidence, peerId)
+    const preimage = sellerBoundPreimage(input.nonce, bundleDigest(bundle), peerId)
     let signer: string
     try {
       signer = recoverEvmAddress(preimage, input.evidence)
@@ -77,15 +80,21 @@ export const sellerBoundCapability: Capability = {
     if (signer !== peerId) {
       return { claim, ok: false, detail: `signer ${signer.slice(0, 10)}… does not match peer ${peerId.slice(0, 10)}…` }
     }
-    return { claim, ok: true, detail: `seller identity ${peerId.slice(0, 10)}… signed this quote (fresh nonce bound)` }
+    return { claim, ok: true, detail: `seller identity ${peerId.slice(0, 10)}… signed this bundle (fresh nonce bound)` }
   },
 
   async collect(input: CapabilityCollectInput): Promise<Uint8Array> {
     if (!input.sign) throw new Error('seller-bound requires a signer (seller identity key); not offered')
-    const teeB64 = input.config[evidenceConfigKey(TEE_TDX_ID)]
-    if (!teeB64) throw new Error('seller-bound requires tee-tdx evidence to bind to; collect tee-tdx first')
-    const quoteEvidence = new Uint8Array(Buffer.from(teeB64, 'base64'))
-    const preimage = sellerBoundPreimage(input.nonce, quoteEvidence, input.peerId)
+    // Rebuild the bundle from every OTHER cap's evidence the prover already collected this
+    // round (exposed as "evidence:<capId>" config entries). Must be collected last so the
+    // node + provider quotes are already present.
+    const bundle: Record<string, Uint8Array> = {}
+    for (const [key, b64] of Object.entries(input.config)) {
+      const capId = parseEvidenceConfigKey(key)
+      if (capId && capId !== CAP_ID) bundle[capId] = new Uint8Array(Buffer.from(b64, 'base64'))
+    }
+    if (Object.keys(bundle).length === 0) throw new Error('seller-bound requires other cap evidence to bind to; collect a TEE cap first')
+    const preimage = sellerBoundPreimage(input.nonce, bundleDigest(bundle), input.peerId)
     const sig = await input.sign(preimage)
     if (sig.length !== 65) throw new Error(`signer returned ${sig.length}-byte signature, expected 65 (r‖s‖v)`)
     return sig

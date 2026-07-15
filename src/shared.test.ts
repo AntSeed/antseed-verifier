@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import {
   NONCE_BYTES,
   VERIFIER_ID,
+  bundleDigest,
   claimId,
   computeReportData,
   decodeAttestRequest,
@@ -28,7 +29,7 @@ describe('normalizePeerId', () => {
 
 describe('claimId', () => {
   it('namespaces the capability id under the verifier id', () => {
-    expect(claimId('tee-tdx-genuine')).toBe(`${VERIFIER_ID}:tee-tdx-genuine`)
+    expect(claimId('seller-node-tee-genuine')).toBe(`${VERIFIER_ID}:seller-node-tee-genuine`)
   })
 })
 
@@ -46,28 +47,50 @@ describe('computeReportData', () => {
   })
 })
 
+describe('bundleDigest', () => {
+  it('is a deterministic 32-byte digest, independent of map insertion order', () => {
+    const a = { 'seller-node-tee-genuine': randomBytes(100), 'seller-provider-tee-genuine': randomBytes(80) }
+    const b = { 'seller-provider-tee-genuine': a['seller-provider-tee-genuine'], 'seller-node-tee-genuine': a['seller-node-tee-genuine'] }
+    const da = bundleDigest(a)
+    expect(da.length).toBe(32)
+    expect(Buffer.from(da).equals(bundleDigest(b))).toBe(true)
+  })
+  it('excludes the seller-bound entry (signing over itself is impossible)', () => {
+    const base = { 'seller-node-tee-genuine': randomBytes(64) }
+    const withSb = { ...base, 'seller-bound': randomBytes(65) }
+    expect(Buffer.from(bundleDigest(base)).equals(bundleDigest(withSb))).toBe(true)
+  })
+  it('changes when any covered evidence byte flips', () => {
+    const ev = randomBytes(64)
+    const base = bundleDigest({ 'seller-node-tee-genuine': ev })
+    const tampered = Uint8Array.from(ev)
+    tampered[0]! ^= 0xff
+    expect(Buffer.from(base).equals(bundleDigest({ 'seller-node-tee-genuine': tampered }))).toBe(false)
+  })
+})
+
 describe('sellerBoundPreimage', () => {
   it('is a deterministic 32-byte digest', () => {
     const nonce = randomBytes(NONCE_BYTES)
-    const ev = randomBytes(120)
-    const a = sellerBoundPreimage(nonce, ev, PEER)
+    const digest = randomBytes(32)
+    const a = sellerBoundPreimage(nonce, digest, PEER)
     expect(a.length).toBe(32)
-    expect(Buffer.from(a).equals(sellerBoundPreimage(nonce, ev, PEER))).toBe(true)
+    expect(Buffer.from(a).equals(sellerBoundPreimage(nonce, digest, PEER))).toBe(true)
   })
-  it('binds to nonce, quote evidence and peer id independently', () => {
+  it('binds to nonce, bundle digest and peer id independently', () => {
     const nonce = randomBytes(NONCE_BYTES)
-    const ev = randomBytes(120)
-    const base = sellerBoundPreimage(nonce, ev, PEER)
-    expect(Buffer.from(base).equals(sellerBoundPreimage(randomBytes(NONCE_BYTES), ev, PEER))).toBe(false)
-    expect(Buffer.from(base).equals(sellerBoundPreimage(nonce, randomBytes(120), PEER))).toBe(false)
-    expect(Buffer.from(base).equals(sellerBoundPreimage(nonce, ev, 'b'.repeat(40)))).toBe(false)
+    const digest = randomBytes(32)
+    const base = sellerBoundPreimage(nonce, digest, PEER)
+    expect(Buffer.from(base).equals(sellerBoundPreimage(randomBytes(NONCE_BYTES), digest, PEER))).toBe(false)
+    expect(Buffer.from(base).equals(sellerBoundPreimage(nonce, randomBytes(32), PEER))).toBe(false)
+    expect(Buffer.from(base).equals(sellerBoundPreimage(nonce, digest, 'b'.repeat(40)))).toBe(false)
   })
 })
 
 describe('attestation request codec (multi-cap)', () => {
   it('round-trips the nonce and cap menu', () => {
     const nonce = randomBytes(NONCE_BYTES)
-    const caps = ['tee-tdx-genuine', 'seller-bound']
+    const caps = ['seller-node-tee-genuine', 'seller-bound']
     const decoded = decodeAttestRequest(encodeAttestRequest(nonce, caps))
     expect(Buffer.from(decoded.nonce).equals(nonce)).toBe(true)
     expect(decoded.caps).toEqual(caps)
@@ -88,11 +111,11 @@ describe('attestation request codec (multi-cap)', () => {
 
 describe('attestation response codec (per-cap evidence)', () => {
   it('round-trips a per-cap evidence map, including an empty entry', () => {
-    const evidence = { 'tee-tdx-genuine': randomBytes(100), 'seller-bound': randomBytes(65), 'measured-image': new Uint8Array() }
+    const evidence = { 'seller-node-tee-genuine': randomBytes(100), 'seller-bound': randomBytes(65), 'seller-provider-measured-image': new Uint8Array() }
     const decoded = decodeAttestResponse(encodeAttestResponse(evidence))
-    expect(Buffer.from(decoded['tee-tdx-genuine']!).equals(evidence['tee-tdx-genuine'])).toBe(true)
+    expect(Buffer.from(decoded['seller-node-tee-genuine']!).equals(evidence['seller-node-tee-genuine'])).toBe(true)
     expect(Buffer.from(decoded['seller-bound']!).equals(evidence['seller-bound'])).toBe(true)
-    expect(decoded['measured-image']!.length).toBe(0)
+    expect(decoded['seller-provider-measured-image']!.length).toBe(0)
   })
   it('round-trips an empty evidence map', () => {
     expect(decodeAttestResponse(encodeAttestResponse({}))).toEqual({})

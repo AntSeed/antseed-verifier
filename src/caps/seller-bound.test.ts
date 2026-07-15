@@ -6,8 +6,7 @@ import {
   sellerBoundCapability,
   signerFromPrivateKey,
 } from './seller-bound.js'
-import { claimId, evidenceConfigKey, sellerBoundPreimage } from '../shared.js'
-import type { ParsedTdxQuote } from './tee-tdx.js'
+import { bundleDigest, claimId, evidenceConfigKey, sellerBoundPreimage } from '../shared.js'
 
 // Fixed test keypairs (valid secp256k1 scalars, < curve order, != 0).
 const PRIV = '01'.repeat(32)
@@ -15,14 +14,18 @@ const PRIV2 = '02'.repeat(32)
 const PEER = evmAddressFromPrivateKey(PRIV)
 const CLAIM = claimId('seller-bound')
 
-/** Minimal shared quote — seller-bound only needs the raw tee-tdx evidence bytes. */
-function parsed(quoteEvidence: Uint8Array): ParsedTdxQuote {
-  return { quoteEvidence, status: 'UpToDate', td: null }
+const NODE = 'seller-node-tee-genuine'
+const PROVIDER = 'seller-provider-tee-genuine'
+
+/** Seller side: expose each cap's evidence as an "evidence:<capId>" config entry, then sign the bundle. */
+async function collect(peerId: string, bundle: Record<string, Uint8Array>, nonce: Uint8Array, sign = signerFromPrivateKey(PRIV)) {
+  const config: Record<string, string> = {}
+  for (const [id, bytes] of Object.entries(bundle)) config[evidenceConfigKey(id)] = Buffer.from(bytes).toString('base64')
+  return sellerBoundCapability.collect!({ nonce, peerId, config, sign })
 }
 
-async function collect(peerId: string, quoteEvidence: Uint8Array, nonce: Uint8Array, sign = signerFromPrivateKey(PRIV)) {
-  const config = { [evidenceConfigKey('tee-tdx-genuine')]: Buffer.from(quoteEvidence).toString('base64') }
-  return sellerBoundCapability.collect!({ nonce, peerId, config, sign })
+function verify(nonce: Uint8Array, sig: Uint8Array, bundle: Record<string, Uint8Array>, peerId = PEER) {
+  return sellerBoundCapability.verify({ nonce, peerId, evidence: sig, evidenceBundle: bundle })
 }
 
 describe('seller-bound helpers', () => {
@@ -40,59 +43,85 @@ describe('seller-bound helpers', () => {
   })
 })
 
-describe('seller-bound capability', () => {
-  it('collect → verify round-trips: the signer matches the peer id', async () => {
+describe('seller-bound capability (whole-bundle binding)', () => {
+  it('collect → verify round-trips over the whole bundle (node + provider)', async () => {
     const nonce = randomBytes(32)
-    const quoteEvidence = randomBytes(120)
-    const sig = await collect(PEER, quoteEvidence, nonce)
-    const r = await sellerBoundCapability.verify({ nonce, peerId: PEER, evidence: sig, parsedQuote: parsed(quoteEvidence) })
-    expect(r).toMatchObject({ claim: CLAIM, ok: true })
+    const bundle = { [NODE]: randomBytes(100), [PROVIDER]: randomBytes(80) }
+    const sig = await collect(PEER, bundle, nonce)
+    expect(verify(nonce, sig, bundle)).toMatchObject({ claim: CLAIM, ok: true })
   })
 
-  it('signs the exact seller-bound preimage', async () => {
+  it('signs the exact bundle preimage', async () => {
     const nonce = randomBytes(32)
-    const quoteEvidence = randomBytes(120)
-    const sig = await collect(PEER, quoteEvidence, nonce)
+    const bundle = { [NODE]: randomBytes(100), [PROVIDER]: randomBytes(80) }
+    const sig = await collect(PEER, bundle, nonce)
     // Independently recover against the canonical preimage — must yield the seller's address.
-    expect(recoverEvmAddress(sellerBoundPreimage(nonce, quoteEvidence, PEER), sig)).toBe(PEER)
+    expect(recoverEvmAddress(sellerBoundPreimage(nonce, bundleDigest(bundle), PEER), sig)).toBe(PEER)
   })
 
-  it('fails when a different key signed (signer != peer)', async () => {
+  it('fails when a byte flips in ANY covered evidence entry', async () => {
     const nonce = randomBytes(32)
-    const quoteEvidence = randomBytes(120)
-    const sig = await collect(PEER, quoteEvidence, nonce, signerFromPrivateKey(PRIV2))
-    const r = await sellerBoundCapability.verify({ nonce, peerId: PEER, evidence: sig, parsedQuote: parsed(quoteEvidence) })
+    const bundle = { [NODE]: randomBytes(100), [PROVIDER]: randomBytes(80) }
+    const sig = await collect(PEER, bundle, nonce)
+    for (const target of [NODE, PROVIDER]) {
+      const tampered = { ...bundle, [target]: Uint8Array.from(bundle[target]) }
+      tampered[target][0] ^= 0xff
+      const r = verify(nonce, sig, tampered)
+      expect(r.ok, `tampering ${target} should fail`).toBe(false)
+      expect(r.detail).toMatch(/does not match peer/)
+    }
+  })
+
+  it('fails on a stale / replayed nonce', async () => {
+    const nonce = randomBytes(32)
+    const bundle = { [NODE]: randomBytes(100) }
+    const sig = await collect(PEER, bundle, nonce)
+    const r = verify(randomBytes(32), sig, bundle) // a fresh round's nonce; the old signature is stale
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/does not match peer/)
   })
 
-  it('fails when the seller returned no signature', async () => {
-    const r = await sellerBoundCapability.verify({ nonce: randomBytes(32), peerId: PEER, parsedQuote: parsed(randomBytes(120)) })
+  it('fails when a different key signed (signer != peer)', async () => {
+    const nonce = randomBytes(32)
+    const bundle = { [NODE]: randomBytes(100) }
+    const sig = await collect(PEER, bundle, nonce, signerFromPrivateKey(PRIV2))
+    const r = verify(nonce, sig, bundle)
+    expect(r.ok).toBe(false)
+    expect(r.detail).toMatch(/does not match peer/)
+  })
+
+  it('fails when the seller returned no signature', () => {
+    const r = sellerBoundCapability.verify({ nonce: randomBytes(32), peerId: PEER, evidenceBundle: { [NODE]: randomBytes(100) } })
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/no identity signature/)
   })
 
-  it('fails when there is no tee-tdx quote to bind to', async () => {
-    const r = await sellerBoundCapability.verify({ nonce: randomBytes(32), peerId: PEER, evidence: randomBytes(65) })
+  it('fails when there is no evidence bundle to bind to', () => {
+    const r = sellerBoundCapability.verify({ nonce: randomBytes(32), peerId: PEER, evidence: randomBytes(65) })
     expect(r.ok).toBe(false)
-    expect(r.detail).toMatch(/requires a tee-tdx quote/)
+    expect(r.detail).toMatch(/requires the evidence bundle/)
   })
 
-  it('fails on a malformed (wrong-length) signature', async () => {
-    const qe = randomBytes(120)
-    const r = await sellerBoundCapability.verify({ nonce: randomBytes(32), peerId: PEER, evidence: randomBytes(10), parsedQuote: parsed(qe) })
+  it('fails when the bundle has no other evidence to cover', () => {
+    const r = sellerBoundCapability.verify({ nonce: randomBytes(32), peerId: PEER, evidence: randomBytes(65), evidenceBundle: {} })
+    expect(r.ok).toBe(false)
+    expect(r.detail).toMatch(/no other evidence/)
+  })
+
+  it('fails on a malformed (wrong-length) signature', () => {
+    const r = verify(randomBytes(32), randomBytes(10), { [NODE]: randomBytes(100) })
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/recovery failed|65 bytes/)
   })
 
   it('collect throws (cap not offered) without a signer', async () => {
-    const config = { [evidenceConfigKey('tee-tdx-genuine')]: Buffer.from(randomBytes(50)).toString('base64') }
+    const config = { [evidenceConfigKey(NODE)]: Buffer.from(randomBytes(50)).toString('base64') }
     await expect(sellerBoundCapability.collect!({ nonce: randomBytes(32), peerId: PEER, config })).rejects.toThrow(/requires a signer/)
   })
 
-  it('collect throws without tee-tdx evidence to bind to', async () => {
+  it('collect throws without any cap evidence to bind to', async () => {
     await expect(
       sellerBoundCapability.collect!({ nonce: randomBytes(32), peerId: PEER, config: {}, sign: signerFromPrivateKey(PRIV) }),
-    ).rejects.toThrow(/requires tee-tdx evidence/)
+    ).rejects.toThrow(/requires other cap evidence/)
   })
 })

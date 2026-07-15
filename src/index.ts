@@ -23,7 +23,8 @@ export {
   capabilityIds,
 } from './capability.js'
 export {
-  teeTdxCapability,
+  nodeTeeCapability,
+  providerTeeCapability,
   sellerBoundCapability,
   measuredImageCapability,
   gpuNvidiaCapability,
@@ -31,7 +32,13 @@ export {
 
 // Buyer-side orchestration + the injectable DCAP seam (useful for tooling/tests).
 export { runVerify } from './verifier.js'
-export { defaultVerifyQuote, verifyTdxEvidence } from './caps/tee-tdx.js'
+export {
+  makeTdxCap,
+  defaultVerifyQuote,
+  verifyTdxEvidence,
+  NODE_TEE_CAP_ID,
+  PROVIDER_TEE_CAP_ID,
+} from './caps/tee-tdx.js'
 export type { VerifyQuoteFn, RawTdxVerification, ParsedTdxQuote, TdMeasurements } from './caps/tee-tdx.js'
 export type { ApprovedMeasurement, MeasuredImagePolicy } from './caps/measured-image.js'
 
@@ -41,5 +48,6 @@ export {
   ATTEST_PATH,
   claimId,
   computeReportData,
+  bundleDigest,
   sellerBoundPreimage,
 } from './shared.js'
