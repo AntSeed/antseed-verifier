@@ -1,62 +1,41 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto'
-import type { AntseedVerifierPlugin, VerifyContext, VerifyResult } from '@antseed/node'
+import { randomBytes } from 'node:crypto'
+import type { AntseedVerifierPlugin, ClaimResult, VerifyContext, VerifyResult } from '@antseed/node'
+import './caps/index.js' // side-effect: register the capability menu
+import { capabilityIds, getCapability } from './capability.js'
+import { defaultVerifyQuote, verifyTdxEvidence, type ParsedTdxQuote, type VerifyQuoteFn } from './caps/tee-tdx.js'
 import {
-  CLAIM_HARDWARE_GENUINE,
   NONCE_BYTES,
   VERIFIER_ID,
-  computeReportData,
+  claimId,
   decodeAttestResponse,
   encodeAttestRequest,
   normalizePeerId,
 } from './shared.js'
 
 /**
- * Buyer half. Fetches a fresh TDX quote from the seller, verifies it with @phala/dcap-qvl
- * and checks the report_data binding. Returns one claim: hardware-genuine.
+ * Buyer half. Fetches per-capability evidence from the seller in one attestation round,
+ * verifies each requested capability, and returns one ClaimResult per capability. The
+ * overall verdict is pass iff every REQUIRED capability passed; extra caps the seller
+ * evidenced are reported as informational claims.
  */
 
 /**
- * TCB statuses accepted for a "hardware-genuine" verdict. These indicate genuine
- * Intel hardware with a current platform TCB; SWHardeningNeeded flags guest-side
- * software mitigations only and does not impugn the hardware. Anything else
- * (OutOfDate, Revoked, Unknown, ...) is rejected.
+ * The caps that MUST pass for ok=true. @antseed/node's VerifyContext carries no buyer
+ * config yet, so this is a fixed default: genuine TDX hardware AND seller-identity binding.
+ * Everything else (measured-image, gpu) is informational until buyers can pass policy.
  */
-const ACCEPTABLE_TCB = new Set<string>(['UpToDate', 'SWHardeningNeeded'])
+const REQUIRED_CAPS = ['tee-tdx-genuine', 'seller-bound']
+const TEE_TDX_ID = 'tee-tdx-genuine'
+/** Derived cap (no own evidence): always worth reporting when a TDX quote is present. */
+const DERIVED_CAPS = ['measured-image']
 
-export interface QuoteVerification {
-  /** Intel DCAP TCB status string from @phala/dcap-qvl (e.g. 'UpToDate'). */
-  status: string
-  /** Authenticated TDX REPORTDATA (64 bytes), or null if the quote is not TDX. */
-  reportData: Uint8Array | null
+function msg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }
 
-/** Injectable DCAP check — the default verifies for real; tests inject a stub. */
-export type VerifyQuoteFn = (
-  quote: Uint8Array,
-  collateral: unknown | undefined,
-  nowSecs: number,
-) => Promise<QuoteVerification>
-
-/**
- * Default DCAP verifier: validates the quote's ECDSA signature + PCK cert chain to
- * Intel's production root CA + TCB. When the seller supplied collateral we use it;
- * otherwise we fetch collateral from a public PCCS. @phala/dcap-qvl is imported
- * lazily so the seller/prover half never loads it.
- */
-export const defaultVerifyQuote: VerifyQuoteFn = async (quote, collateral, nowSecs) => {
-  type Dcap = typeof import('@phala/dcap-qvl')
-  const mod = (await import('@phala/dcap-qvl')) as Dcap & { default?: Dcap }
-  const dcap = mod.default ?? mod
-  const verified = collateral !== undefined
-    ? dcap.verify(Buffer.from(quote), collateral as never, nowSecs)
-    : await dcap.getCollateralAndVerify(Buffer.from(quote))
-  const td = verified.report.asTd10()
-  return { status: verified.status, reportData: td ? td.reportData : null }
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b))
+/** When we can't even get evidence, fail every required cap with the same reason. */
+function failAll(detail: string): VerifyResult {
+  return { ok: false, claims: REQUIRED_CAPS.map((id) => ({ claim: claimId(id), ok: false, detail })) }
 }
 
 /** Core orchestration; the DCAP check is injectable for testing. */
@@ -64,19 +43,16 @@ export async function runVerify(
   ctx: VerifyContext,
   verifyQuote: VerifyQuoteFn = defaultVerifyQuote,
 ): Promise<VerifyResult> {
-  const fail = (detail: string): VerifyResult => ({
-    ok: false,
-    claims: [{ claim: CLAIM_HARDWARE_GENUINE, ok: false, detail }],
-  })
-
   let peerId: string
   try {
     peerId = normalizePeerId(ctx.peerId)
   } catch (err) {
-    return fail(err instanceof Error ? err.message : String(err))
+    return failAll(msg(err))
   }
 
   const nonce = randomBytes(NONCE_BYTES)
+  // Offer the whole menu; the seller returns evidence only for the caps its infra supports.
+  const requested = capabilityIds()
 
   let resp
   try {
@@ -84,53 +60,46 @@ export async function runVerify(
       method: 'POST',
       path: ctx.attestPath,
       headers: { 'content-type': 'application/json' },
-      body: encodeAttestRequest(nonce),
+      body: encodeAttestRequest(nonce, requested),
     })
   } catch (err) {
-    return fail(`attestation request failed: ${err instanceof Error ? err.message : String(err)}`)
+    return failAll(`attestation request failed: ${msg(err)}`)
   }
 
   if (resp.statusCode !== 200) {
-    return fail(`attestation service returned HTTP ${resp.statusCode}`)
+    return failAll(`attestation service returned HTTP ${resp.statusCode}`)
   }
 
-  let quote: Uint8Array
-  let collateral: unknown
+  let evidence: Record<string, Uint8Array>
   try {
-    const decoded = decodeAttestResponse(resp.body)
-    quote = decoded.quote
-    collateral = decoded.collateral
+    evidence = decodeAttestResponse(resp.body)
   } catch (err) {
-    return fail(`malformed attestation response: ${err instanceof Error ? err.message : String(err)}`)
+    return failAll(`malformed attestation response: ${msg(err)}`)
   }
 
-  let verification: QuoteVerification
-  try {
-    verification = await verifyQuote(quote, collateral, Math.floor(Date.now() / 1000))
-  } catch (err) {
-    return fail(`quote verification failed: ${err instanceof Error ? err.message : String(err)}`)
+  // DCAP-verify the tee-tdx quote once; share the parsed result with every dependent cap.
+  let parsed: ParsedTdxQuote | undefined
+  const teeEv = evidence[TEE_TDX_ID]
+  if (teeEv) {
+    parsed = await verifyTdxEvidence(teeEv, verifyQuote, Math.floor(Date.now() / 1000))
   }
 
-  if (!ACCEPTABLE_TCB.has(verification.status)) {
-    return fail(`TCB status not acceptable: ${verification.status}`)
-  }
-  if (!verification.reportData) {
-    return fail('quote is not an Intel TDX quote')
+  // Verify the required caps, any cap the seller returned evidence for, and derived caps.
+  const wanted = new Set([...REQUIRED_CAPS, ...Object.keys(evidence), ...DERIVED_CAPS])
+  const claims: ClaimResult[] = []
+  for (const capId of capabilityIds()) {
+    if (!wanted.has(capId)) continue
+    const cap = getCapability(capId)
+    if (!cap) continue
+    try {
+      claims.push(await cap.verify({ nonce, peerId, evidence: evidence[capId], parsedQuote: parsed }))
+    } catch (err) {
+      claims.push({ claim: claimId(capId), ok: false, detail: `verify threw: ${msg(err)}` })
+    }
   }
 
-  const expected = computeReportData(nonce, peerId)
-  if (!bytesEqual(verification.reportData, expected)) {
-    return fail('report_data mismatch: quote not fresh or not bound to this peer (expected SHA-512(nonce ‖ peerId))')
-  }
-
-  return {
-    ok: true,
-    claims: [{
-      claim: CLAIM_HARDWARE_GENUINE,
-      ok: true,
-      detail: `genuine Intel TDX quote (TCB ${verification.status}); report_data bound to ${peerId.slice(0, 10)}…`,
-    }],
-  }
+  const ok = REQUIRED_CAPS.every((id) => claims.some((c) => c.claim === claimId(id) && c.ok))
+  return { ok, claims }
 }
 
 const verifierPlugin: AntseedVerifierPlugin = {
@@ -138,7 +107,8 @@ const verifierPlugin: AntseedVerifierPlugin = {
   name: VERIFIER_ID,
   displayName: 'TEE attestation verifier (Intel TDX / DCAP)',
   version: '0.1.0',
-  description: 'Verifies a seller runs in a genuine Intel TDX enclave: DCAP quote validated to Intel\'s root with an acceptable TCB, and report_data bound to a fresh nonce and the seller\'s peer id.',
+  description:
+    'Capability-based seller attestation: one claim per capability. Requires genuine Intel TDX hardware (tee-tdx-genuine) and a seller-identity binding (seller-bound); also reports measured-image and gpu-nvidia-cc when available.',
   verify: (ctx) => runVerify(ctx),
 }
 

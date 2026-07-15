@@ -3,20 +3,19 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
 /**
- * Linux configfs-TSM report interface (kernel >= 6.7). Present inside a real Intel
- * TDX guest (e.g. the GCP confidential VM used in the e2e); absent elsewhere.
+ * Self-hosted TDX collector: mint a quote locally via the Linux configfs-TSM report
+ * interface (kernel >= 6.7). Present inside a real Intel TDX guest (e.g. a GCP
+ * confidential VM); absent elsewhere, so this throws off-TEE — which is how the
+ * prover detects it cannot offer the tee-tdx capability via this source.
  */
 const TSM_REPORT_DIR = '/sys/kernel/config/tsm/report'
 
 /**
- * Generate a raw Intel TDX quote bound to `reportData` (64 bytes) via configfs-TSM:
+ * Generate a raw Intel TDX quote bound to `reportData` (64 bytes):
  *   1. mkdir a fresh report entry,
  *   2. write the 64-byte REPORTDATA to `inblob`,
  *   3. read the assembled quote from `outblob`,
  *   4. rmdir the entry.
- *
- * Only succeeds inside a genuine TDX guest with configfs-tsm mounted; throws
- * otherwise (which is fine — the live quote path runs on the TDX VM, not locally).
  */
 export function generateTdxQuote(reportData: Uint8Array): Uint8Array {
   if (reportData.length !== 64) {

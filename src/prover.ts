@@ -1,22 +1,37 @@
 import type { Prover, SellerRequest, SellerResponse } from '@antseed/node'
-import { generateTdxQuote } from './tee.js'
+import './caps/index.js' // side-effect: register the capability menu
+import { listCapabilities } from './capability.js'
+import { evmAddressFromPrivateKey, signerFromPrivateKey } from './caps/seller-bound.js'
 import {
   VERIFIER_ID,
-  computeReportData,
-  decodeAttestRequestNonce,
+  decodeAttestRequest,
   encodeAttestResponse,
+  evidenceConfigKey,
   normalizePeerId,
 } from './shared.js'
 
 /**
- * Seller half — embedded prover (type:'prover'). On each attestation request it reads
- * the buyer's nonce and returns a fresh Intel TDX quote over SHA-512(nonce ‖ peerId).
- * Runs only on a real TDX VM (quote generation needs configfs-tsm).
+ * Seller half — embedded prover (type:'prover'). For each requested capability the seller
+ * SUPPORTS (has a collector for, and whose collection succeeds), it produces evidence and
+ * assembles a per-cap evidence map. Unsupported caps are simply omitted. Provider
+ * differences are handled purely by config (no provider specifics live here).
+ *
+ * Env config:
+ *   ANTSEED_TEE_PEER_ID          this node's peer id (EVM address, no 0x) — required
+ *   ANTSEED_VERIFIER_SOURCE      tee-tdx quote source: "configfs" (default) | "http"
+ *   ANTSEED_VERIFIER_URL         http source: attestation endpoint ({nonce}/{nonce_b64} ok)
+ *   ANTSEED_VERIFIER_FIELD       http source: JSON dot-path to the base64 quote
+ *   ANTSEED_VERIFIER_METHOD      http source: override HTTP method
+ *   ANTSEED_VERIFIER_BODY        http source: request body template
+ *   ANTSEED_VERIFIER_SIGNING_KEY seller identity private key (hex) for seller-bound
  */
 
-/** This node's peer id (EVM address, no 0x), bound into the report_data so the quote is
- *  attributable to this seller. From a trusted env var, never a buyer-supplied value. */
 const PEER_ID_KEY = 'ANTSEED_TEE_PEER_ID'
+const SIGNING_KEY = 'ANTSEED_VERIFIER_SIGNING_KEY'
+
+function msg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
 
 function json(statusCode: number, body: unknown): SellerResponse {
   return {
@@ -26,38 +41,89 @@ function json(statusCode: number, body: unknown): SellerResponse {
   }
 }
 
+/** Generic, provider-neutral collector config assembled from ANTSEED_VERIFIER_* env vars. */
+function baseConfig(): Record<string, string> {
+  const cfg: Record<string, string> = {}
+  const put = (key: string, envKey: string): void => {
+    const v = process.env[envKey]?.trim()
+    if (v) cfg[key] = v
+  }
+  put('source', 'ANTSEED_VERIFIER_SOURCE')
+  put('url', 'ANTSEED_VERIFIER_URL')
+  put('field', 'ANTSEED_VERIFIER_FIELD')
+  put('method', 'ANTSEED_VERIFIER_METHOD')
+  put('body', 'ANTSEED_VERIFIER_BODY')
+  return cfg
+}
+
+/**
+ * A signer for seller-bound, built from the seller's private key. Returns undefined when
+ * no key is set (cap not offered) or the key's address does not match this node's peer id
+ * (a mismatch would only fail on the buyer, so we disable it and log instead).
+ */
+function buildSigner(peerId: string): ((m: Uint8Array) => Promise<Uint8Array>) | undefined {
+  const key = process.env[SIGNING_KEY]?.trim()
+  if (!key) return undefined
+  try {
+    if (evmAddressFromPrivateKey(key) !== peerId) {
+      process.stderr.write(`[${VERIFIER_ID}] ${SIGNING_KEY} address != ${PEER_ID_KEY}; seller-bound disabled\n`)
+      return undefined
+    }
+    return signerFromPrivateKey(key)
+  } catch (err) {
+    process.stderr.write(`[${VERIFIER_ID}] invalid ${SIGNING_KEY}; seller-bound disabled: ${msg(err)}\n`)
+    return undefined
+  }
+}
+
 const prover: Prover = {
   type: 'prover',
   name: VERIFIER_ID,
-  displayName: 'TEE attestation prover (Intel TDX)',
+  displayName: 'TEE attestation prover (capability-based)',
   version: '0.1.0',
-  description: 'Generates Intel TDX attestation quotes so buyers can verify this seller runs in a genuine enclave.',
+  description: 'Produces per-capability seller attestation evidence (Intel TDX quote, seller-identity signature) for buyers to verify.',
 
   async prove(req: SellerRequest): Promise<SellerResponse> {
-    const peerId = process.env[PEER_ID_KEY]?.trim()
-    if (!peerId) {
+    const rawPeer = process.env[PEER_ID_KEY]?.trim()
+    if (!rawPeer) {
       return json(500, {
-        error: {
-          message: `${PEER_ID_KEY} is not set; the prover must know this node's peer id (EVM address) to bind the TDX report_data`,
-          type: 'tee_error',
-        },
+        error: { message: `${PEER_ID_KEY} is not set; the prover must know this node's peer id (EVM address)`, type: 'tee_error' },
       })
     }
+    let peerId: string
+    try {
+      peerId = normalizePeerId(rawPeer)
+    } catch (err) {
+      return json(500, { error: { message: msg(err), type: 'tee_error' } })
+    }
+
     let nonce: Uint8Array
+    let caps: string[]
     try {
-      nonce = decodeAttestRequestNonce(req.body ?? new Uint8Array())
+      ;({ nonce, caps } = decodeAttestRequest(req.body ?? new Uint8Array()))
     } catch (err) {
-      return json(400, { error: { message: err instanceof Error ? err.message : String(err), type: 'invalid_request_error' } })
+      return json(400, { error: { message: msg(err), type: 'invalid_request_error' } })
     }
-    try {
-      const reportData = computeReportData(nonce, normalizePeerId(peerId))
-      const quote = generateTdxQuote(reportData)
-      return { statusCode: 200, headers: { 'content-type': 'application/json' }, body: encodeAttestResponse(quote) }
-    } catch (err) {
-      return json(500, {
-        error: { message: `TDX quote generation failed: ${err instanceof Error ? err.message : String(err)}`, type: 'tee_error' },
-      })
+
+    const config = baseConfig()
+    const sign = buildSigner(peerId)
+
+    const evidence: Record<string, Uint8Array> = {}
+    // Registry order guarantees a dependency (tee-tdx) is collected before its dependents.
+    for (const cap of listCapabilities()) {
+      if (!caps.includes(cap.id) || !cap.collect) continue
+      try {
+        const bytes = await cap.collect({ nonce, peerId, config, sign })
+        evidence[cap.id] = bytes
+        // Expose to later dependent collectors (seller-bound binds to the tee-tdx evidence).
+        config[evidenceConfigKey(cap.id)] = Buffer.from(bytes).toString('base64')
+      } catch (err) {
+        // Unsupported by this seller's infra (or a dependency was missing) — omit the cap.
+        process.stderr.write(`[${VERIFIER_ID}] capability "${cap.id}" not offered: ${msg(err)}\n`)
+      }
     }
+
+    return { statusCode: 200, headers: { 'content-type': 'application/json' }, body: encodeAttestResponse(evidence) }
   },
 }
 

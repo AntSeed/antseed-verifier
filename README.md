@@ -15,9 +15,24 @@ One package, two halves:
   payment. It is not a provider and stays transparent to the seller's inference
   providers.
 
-It attests a single claim: `refoundhq-antseed-verifier:hardware-genuine` — the
-seller is a real TDX VM and the quote's report data binds the quote to that
-seller's peer id (`SHA-512(nonce ‖ peerId)`).
+It attests a menu of independent **capabilities**, one claim each (namespaced
+`refoundhq-antseed-verifier:<capability>`). The seller produces evidence for the
+capabilities its infrastructure supports; the buyer verifies each:
+
+- **`tee-tdx-genuine`** — genuine Intel TDX enclave: DCAP-verified quote (ECDSA
+  signature + PCK chain to Intel's root + acceptable TCB), TDX (TD10), debug off.
+- **`seller-bound`** — the seller signs `keccak256(nonce ‖ sha256(tdx evidence) ‖
+  peerId)` with its AntSeed identity key; the buyer recovers the EVM address and
+  requires it to equal the seller's peer id. This makes it *seller*, not merely
+  *provider*, verification, and works even when the quote binds a provider key.
+- **`measured-image`** — compares the quote's MRTD/RTMR0-3 to a buyer-supplied
+  approved-measurement allow-list (pure data; never passes without a policy).
+- **`gpu-nvidia-cc`** — stub (advertised, not yet implemented; NRAS).
+
+The buyer requires `tee-tdx-genuine` and `seller-bound`; the rest are reported
+informationally. Provider differences are handled only by generic, config-driven
+collectors (self-hosted `configfs` TDX, or any `http` attestation endpoint) — the
+SDK itself carries no provider-specific hosts or schemas.
 
 ## Usage
 
@@ -34,16 +49,22 @@ import verifier, { prover } from '@refoundhq/antseed-verifier'
 // prover:   named export, type:'prover'   (seller half)
 ```
 
-Also exported for tooling and tests: `runVerify`, `defaultVerifyQuote`,
-`VERIFIER_ID`, `ATTEST_PATH`, `CLAIM_HARDWARE_GENUINE`, `computeReportData`.
+Also exported for tooling and tests: the capability registry (`registerCapability`,
+`getCapability`, `listCapabilities`, `capabilityIds`) and the built-in capabilities
+(`teeTdxCapability`, `sellerBoundCapability`, `measuredImageCapability`,
+`gpuNvidiaCapability`); `runVerify`, `defaultVerifyQuote`, `verifyTdxEvidence`;
+`VERIFIER_ID`, `ATTEST_PATH`, `claimId`, `computeReportData`, `sellerBoundPreimage`.
 
 ## Requirements
 
-The prover generates TDX quotes through configfs-tsm, so it runs only on a real
-Intel TDX VM and needs root (the `/sys/kernel/config/tsm/report` files are
-root-owned). It reads the seller's peer id from `ANTSEED_TEE_PEER_ID`, set by the
-operator or launcher, never from a buyer-supplied value. The verifier half has no
-special hardware requirement.
+The prover collects a TDX quote via a config-selected source: `configfs` (default;
+mints the quote through `/sys/kernel/config/tsm/report`, so it runs only on a real
+Intel TDX VM and needs root) or `http` (fetches a pre-made quote from any endpoint
+configured by URL + JSON field path). It reads the seller's peer id from
+`ANTSEED_TEE_PEER_ID` and its collector/signer config from `ANTSEED_VERIFIER_*`
+(`SOURCE`, `URL`, `FIELD`, `METHOD`, `BODY`, and `SIGNING_KEY` — the identity key
+that produces `seller-bound` signatures), never from buyer-supplied values. The
+verifier half has no special hardware requirement.
 
 ## Build and test
 
