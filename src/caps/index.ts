@@ -6,14 +6,15 @@ import { gpuNvidiaCapability } from './gpu-nvidia.js'
 
 /**
  * Registration order defines both the advertised menu order and the seller's collect
- * order. Both TDX caps come first because seller-bound signs over their evidence (the
- * whole bundle) and measured-image derives from the provider quote — so seller-bound
- * MUST be registered after both TDX caps to see them when it collects.
+ * order. seller-bound signs over the WHOLE bundle, so every cap that produces evidence
+ * (both TDX caps AND the GPU-CC cap) MUST be registered BEFORE seller-bound, so they are
+ * already collected and visible when seller-bound builds the digest it signs. measured-image
+ * derives from the provider quote and has no own evidence, so its position is immaterial.
  */
 registerCapability(nodeTeeCapability)
 registerCapability(providerTeeCapability)
+registerCapability(gpuNvidiaCapability)
 registerCapability(sellerBoundCapability)
 registerCapability(measuredImageCapability)
-registerCapability(gpuNvidiaCapability)
 
 export { nodeTeeCapability, providerTeeCapability, sellerBoundCapability, measuredImageCapability, gpuNvidiaCapability }

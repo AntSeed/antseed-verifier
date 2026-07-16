@@ -34,7 +34,13 @@ capabilities its infrastructure supports; the buyer verifies each:
 - **`seller-provider-measured-image`** — compares the provider quote's MRTD/RTMR0-3
   to a buyer-supplied approved-measurement allow-list (pure data; never passes
   without a policy).
-- **`seller-provider-gpu-cc`** — stub (advertised, not yet implemented; NRAS).
+- **`seller-provider-gpu-cc`** — proves the provider's GPUs run NVIDIA Confidential
+  Computing. The buyer submits the provider's per-GPU CC evidence + the round nonce to
+  NVIDIA's Remote Attestation Service (NRAS) and verifies the returned EAR (signed JWT):
+  signature valid against NVIDIA's JWKS, overall result success, CC mode, nonce bound to
+  this round. The buyer-side check is an injectable `GpuVerifyFn` (default NRAS), so an
+  offline verifier drops in with no cap change — reserve `ANTSEED_VERIFIER_GPU_MODE=local`
+  (not yet built). Informational, never required (a CPU-only seller still verifies).
 
 The buyer requires `seller-node-tee-genuine` and `seller-bound`; the rest are
 reported informationally. Provider differences are handled only by generic,

@@ -1,15 +1,162 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, vi, afterEach } from 'vitest'
 import { randomBytes } from 'node:crypto'
-import { gpuNvidiaCapability } from './gpu-nvidia.js'
+import { SignJWT, generateKeyPair, type JWTVerifyGetKey } from 'jose'
+import {
+  makeGpuNvidiaCap,
+  makeNrasGpuVerify,
+  gpuConfigKey,
+  localGpuVerify,
+  defaultGpuVerify,
+  type GpuVerifyFn,
+} from './gpu-nvidia.js'
+import type { NrasRequest, NvidiaGpuEvidence } from '../nras.js'
 import { claimId } from '../shared.js'
 
-describe('seller-provider-gpu-cc capability (stub)', () => {
-  it('is registered in the menu but reports not-implemented', () => {
-    const r = gpuNvidiaCapability.verify({ nonce: randomBytes(32), peerId: 'f'.repeat(40) })
-    expect(r).toMatchObject({ claim: claimId('seller-provider-gpu-cc'), ok: false })
-    expect(r.detail).toMatch(/not yet implemented \(NRAS\)/)
+const CLAIM = claimId('seller-provider-gpu-cc')
+const NONCE = randomBytes(32)
+const HEX = Buffer.from(NONCE).toString('hex')
+const EVIDENCE = new Uint8Array([1, 2, 3])
+
+/** Build a cap with an injected GpuVerifyFn stub and verify one round (evidence present). */
+function verifyWith(stub: GpuVerifyFn, evidence: Uint8Array = EVIDENCE) {
+  return makeGpuNvidiaCap(stub).verify({ nonce: NONCE, peerId: 'a'.repeat(40), evidence })
+}
+
+describe('seller-provider-gpu-cc cap (injected GpuVerifyFn)', () => {
+  it('happy path: claim ok, detail forwarded from the verifier', async () => {
+    const stub: GpuVerifyFn = async () => ({ ok: true, detail: '2 NVIDIA GPUs, CC mode enabled, NRAS-verified' })
+    const r = await verifyWith(stub)
+    expect(r).toMatchObject({ claim: CLAIM, ok: true })
+    expect(r.detail).toMatch(/NRAS-verified/)
   })
-  it('has no collector (nothing for a seller to produce yet)', () => {
-    expect(gpuNvidiaCapability.collect).toBeUndefined()
+
+  it('failure: attestation verdict surfaced as ok:false', async () => {
+    const stub: GpuVerifyFn = async () => ({ ok: false, detail: 'NRAS overall attestation result was not success' })
+    const r = await verifyWith(stub)
+    expect(r.ok).toBe(false)
+    expect(r.detail).toMatch(/overall attestation result/)
+  })
+
+  it('nonce mismatch surfaces as a failure', async () => {
+    const stub: GpuVerifyFn = async () => ({ ok: false, detail: 'NRAS EAR nonce does not match this attestation round' })
+    const r = await verifyWith(stub)
+    expect(r.ok).toBe(false)
+    expect(r.detail).toMatch(/nonce/)
+  })
+
+  it('fails closed on missing evidence WITHOUT invoking the verifier', async () => {
+    const stub = vi.fn<GpuVerifyFn>(async () => ({ ok: true, detail: 'should not run' }))
+    // Build the input directly so evidence is genuinely absent (a default param would mask it).
+    const r = await makeGpuNvidiaCap(stub).verify({ nonce: NONCE, peerId: 'a'.repeat(40) })
+    expect(r.ok).toBe(false)
+    expect(r.detail).toMatch(/no GPU CC evidence/)
+    expect(stub).not.toHaveBeenCalled()
+  })
+
+  it('marks network/service errors [transient] in the detail', async () => {
+    const stub: GpuVerifyFn = async () => ({ ok: false, transient: true, detail: 'NRAS request failed: fetch error' })
+    const r = await verifyWith(stub)
+    expect(r.ok).toBe(false)
+    expect(r.detail).toMatch(/^\[transient\]/)
+  })
+})
+
+describe('gpu mode dispatch', () => {
+  it('localGpuVerify returns a clear not-implemented error (offline path reserved)', async () => {
+    const r = await localGpuVerify(EVIDENCE, NONCE)
+    expect(r.ok).toBe(false)
+    expect(r.detail).toMatch(/offline GPU verification not yet implemented/)
+  })
+
+  it('defaultGpuVerify honours ANTSEED_VERIFIER_GPU_MODE=local', async () => {
+    const prev = process.env.ANTSEED_VERIFIER_GPU_MODE
+    process.env.ANTSEED_VERIFIER_GPU_MODE = 'local'
+    try {
+      const r = await defaultGpuVerify(EVIDENCE, NONCE)
+      expect(r.detail).toMatch(/not yet implemented/)
+    } finally {
+      if (prev === undefined) delete process.env.ANTSEED_VERIFIER_GPU_MODE
+      else process.env.ANTSEED_VERIFIER_GPU_MODE = prev
+    }
+  })
+})
+
+describe('collect (evidence off the provider route)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('throws (cap not offered) when url or field is unconfigured', async () => {
+    const cap = makeGpuNvidiaCap()
+    await expect(cap.collect!({ nonce: NONCE, peerId: 'a'.repeat(40), config: {} })).rejects.toThrow(/not offered/)
+  })
+
+  it('fetches the GPU field and preserves its JSON shape (with {nonce} substitution)', async () => {
+    const gpuEvidence: NvidiaGpuEvidence = { arch: 'HOPPER', evidence_list: [{ evidence: 'e', certificate: 'c' }] }
+    let seenUrl = ''
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      seenUrl = u
+      return { ok: true, status: 200, json: async () => ({ gpu_evidence: gpuEvidence }) }
+    }))
+    const cap = makeGpuNvidiaCap()
+    const out = await cap.collect!({
+      nonce: NONCE,
+      peerId: 'a'.repeat(40),
+      config: { [gpuConfigKey('url')]: 'https://prov.example/ev/{nonce}', [gpuConfigKey('field')]: 'gpu_evidence' },
+    })
+    expect(seenUrl).toBe(`https://prov.example/ev/${HEX}`)
+    expect(JSON.parse(new TextDecoder().decode(out))).toEqual(gpuEvidence)
+  })
+})
+
+/**
+ * End-to-end NRAS seam WITHOUT the network: real evidence blob → buildNrasRequest → injected
+ * submit → real jose EAR verification (test key). Proves the submit is mockable and the request
+ * shape is correct, while exercising the genuine signature/claim/nonce path.
+ */
+describe('makeNrasGpuVerify (injected submit + getKey)', () => {
+  let priv: CryptoKey
+  let pub: CryptoKey
+  let getKey: JWTVerifyGetKey
+
+  beforeAll(async () => {
+    ;({ privateKey: priv, publicKey: pub } = await generateKeyPair('ES256'))
+    getKey = (async () => pub) as unknown as JWTVerifyGetKey
+  })
+
+  it('submits the built request and verifies the returned EAR', async () => {
+    const evidence: NvidiaGpuEvidence = { arch: 'HOPPER', evidence_list: [{ evidence: 'ev', certificate: 'ce' }] }
+    const evidenceBytes = new TextEncoder().encode(JSON.stringify(evidence))
+
+    let submitted: NrasRequest | undefined
+    const submit = async (_url: string, body: NrasRequest) => {
+      submitted = body
+      const overall = await new SignJWT({ 'x-nvidia-overall-att-result': true, eat_nonce: body.nonce })
+        .setProtectedHeader({ alg: 'ES256' }).sign(priv)
+      const device = await new SignJWT({ measres: 'success', eat_nonce: body.nonce })
+        .setProtectedHeader({ alg: 'ES256' }).sign(priv)
+      return [overall, { 'GPU-0': device }]
+    }
+
+    const verify = makeNrasGpuVerify({ submit, getKey })
+    const r = await verify(evidenceBytes, NONCE)
+    expect(r.ok).toBe(true)
+    expect(submitted).toMatchObject({ nonce: HEX, arch: 'HOPPER' })
+    expect(submitted!.evidence_list).toEqual(evidence.evidence_list)
+  })
+
+  it('marks a NRAS submit failure as transient', async () => {
+    const evidence = new TextEncoder().encode(JSON.stringify({ arch: 'HOPPER', evidence_list: [{ evidence: 'e', certificate: 'c' }] }))
+    const submit = async () => { throw new Error('ECONNREFUSED') }
+    const r = await makeNrasGpuVerify({ submit, getKey })(evidence, NONCE)
+    expect(r.ok).toBe(false)
+    expect(r.transient).toBe(true)
+    expect(r.detail).toMatch(/NRAS request failed/)
+  })
+
+  it('fails closed on malformed GPU evidence before any submit', async () => {
+    const submit = vi.fn(async () => 'unused')
+    const r = await makeNrasGpuVerify({ submit, getKey })(new TextEncoder().encode('not json'), NONCE)
+    expect(r.ok).toBe(false)
+    expect(r.detail).toMatch(/invalid GPU evidence/)
+    expect(submit).not.toHaveBeenCalled()
   })
 })

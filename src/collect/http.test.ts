@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { randomBytes } from 'node:crypto'
-import { collectViaHttp } from './http.js'
+import { collectViaHttp, collectJsonFieldViaHttp } from './http.js'
 
 const NONCE = randomBytes(32)
 const HEX = Buffer.from(NONCE).toString('hex')
@@ -41,5 +41,20 @@ describe('collectViaHttp', () => {
   it('throws when the FIELD is absent', async () => {
     stubFetch({ nope: 'x' })
     await expect(collectViaHttp('https://x.example/att', NONCE, 'quote')).rejects.toThrow(/no base64 quote at "quote"/)
+  })
+})
+
+describe('collectJsonFieldViaHttp', () => {
+  it('extracts a structured field and preserves it as JSON bytes', async () => {
+    const gpu = { arch: 'HOPPER', evidence_list: [{ evidence: 'e', certificate: 'c' }] }
+    const f = stubFetch({ gpu_evidence: gpu })
+    const out = await collectJsonFieldViaHttp('https://x.example/att/{nonce}', NONCE, 'gpu_evidence')
+    expect(f.seenUrl()).toBe(`https://x.example/att/${HEX}`)
+    expect(JSON.parse(new TextDecoder().decode(out))).toEqual(gpu)
+  })
+
+  it('throws when the field is absent', async () => {
+    stubFetch({ nope: 'x' })
+    await expect(collectJsonFieldViaHttp('https://x.example/att', NONCE, 'gpu_evidence')).rejects.toThrow(/no value at "gpu_evidence"/)
   })
 })

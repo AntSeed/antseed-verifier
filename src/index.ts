@@ -42,6 +42,23 @@ export {
 export type { VerifyQuoteFn, RawTdxVerification, ParsedTdxQuote, TdMeasurements } from './caps/tee-tdx.js'
 export type { ApprovedMeasurement, MeasuredImagePolicy } from './caps/measured-image.js'
 
+// GPU-CC capability + its injectable buyer-side seam (NRAS now, offline local later).
+export {
+  makeGpuNvidiaCap,
+  makeNrasGpuVerify,
+  nrasGpuVerify,
+  localGpuVerify,
+  defaultGpuVerify,
+} from './caps/gpu-nvidia.js'
+export type { GpuVerifyFn, GpuVerification, NrasOptions } from './caps/gpu-nvidia.js'
+export {
+  NRAS_GPU_ATTEST_URL_DEFAULT,
+  NRAS_JWKS_URL_DEFAULT,
+  buildNrasRequest,
+  verifyEar,
+} from './nras.js'
+export type { NvidiaGpuEvidence, NrasEvidenceItem, NrasRequest, NrasSubmitFn, EarVerification } from './nras.js'
+
 // Shared constants + helpers.
 export {
   VERIFIER_ID,
