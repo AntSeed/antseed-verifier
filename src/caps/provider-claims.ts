@@ -3,7 +3,7 @@ import type { ClaimResult } from '@antseed/node'
 import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '../capability.js'
 import { claimId } from '../shared.js'
 import { collectViaHttp } from '../collect/http.js'
-import { ACCEPTABLE_TCB, type ParsedTdxQuote } from './tee-tdx.js'
+import { isTcbAcceptable, type ParsedTdxQuote } from './tee-tdx.js'
 
 /**
  * Capability 'seller-provider-claims': carries the inference PROVIDER's claims into the
@@ -40,18 +40,29 @@ export function claimsConfigKey(key: string): string {
 }
 
 /**
- * report_data commitment for the tdx-quote binding (64 bytes = the TDX REPORTDATA size):
+ * Domain tag for the canonical provider report_data scheme (v1). Reconciles the three
+ * previously-divergent layouts (node = SHA-512(nonce‖peerId); this cap's old
+ * SHA-512(nonce‖docBytes); the Python provider PoC's SHA-256(nonce‖ts‖pubkey)‖SHA-256(gpu))
+ * into ONE 64-byte provider quote layout so a single provider quote can serve every
+ * provider cap at once:
  *
- *   report_data = SHA-512( nonce(32 raw bytes) || claimsDocumentBytes )
+ *   report_data[ 0:32] = SHA-256( DOMAIN ‖ nonce(32) ‖ SHA-256(claimsDocBytes) )
+ *   report_data[32:64] = SHA-256( gpuEvidenceBytes )   // reserved; the gpu-cc cap owns
+ *                                                       // this half (A7/A2 milestone)
  *
- * Providers minting a fresh quote per attestation round compute this over the exact
- * document bytes they return; the buyer recomputes it from the received bytes and the
- * round nonce, so a bound document is both fresh and provider-TEE-attested.
+ * The node cap keeps its own SHA-512(nonce‖peerId) — it binds identity, not a payload, and
+ * the SDK controls both ends of it. When per-response signing lands (A2), the TEE signing
+ * pubkey folds into the [0:32] preimage. `claimsReportData` returns the 32-byte [0:32]
+ * commitment; the verifier compares it against the provider quote's first half.
  */
+export const PROVIDER_REPORT_DATA_DOMAIN = 'antseed-provider-report-data-v1'
+
 export function claimsReportData(nonce: Uint8Array, docBytes: Uint8Array): Uint8Array {
-  const h = createHash('sha512')
+  const docHash = createHash('sha256').update(Buffer.from(docBytes)).digest()
+  const h = createHash('sha256')
+  h.update(Buffer.from(PROVIDER_REPORT_DATA_DOMAIN, 'utf8'))
   h.update(Buffer.from(nonce))
-  h.update(Buffer.from(docBytes))
+  h.update(docHash)
   return new Uint8Array(h.digest())
 }
 
@@ -93,9 +104,14 @@ export const PROVIDER_CLAIMS_MENU: Record<string, ProviderClaimDefinition> = {
 const CLAIM_NAME_RE = /^[a-z0-9][a-z0-9.-]{0,63}$/
 /** Hard bound on claims per document, so a provider cannot flood the buyer's report. */
 const MAX_CLAIMS = 64
+/** Hard bound on the claims document size before JSON.parse (A8). */
+const MAX_DOC_BYTES = 64 * 1024
 
 /** Parse + validate a claims document envelope. Throws with a doc-level reason. */
 function parseClaimsDoc(bytes: Uint8Array): Map<string, unknown> {
+  if (bytes.length > MAX_DOC_BYTES) {
+    throw new Error(`claims document exceeds ${MAX_DOC_BYTES} bytes (${bytes.length})`)
+  }
   let root: unknown
   try {
     root = JSON.parse(new TextDecoder().decode(bytes))
@@ -142,11 +158,13 @@ function quoteBinding(
 ): string | null {
   if (!p) return 'no verified provider TDX quote in this round (this claim requires seller-provider-tee-genuine evidence)'
   if (p.error) return p.error
-  if (!ACCEPTABLE_TCB.has(p.status)) return `provider TCB status not acceptable: ${p.status || 'unknown'}`
+  if (!isTcbAcceptable(p.status)) return `provider TCB status not acceptable: ${p.status || 'unknown'}`
   if (!p.td) return 'provider quote is not an Intel TDX quote'
   if (p.td.debug === true) return 'provider TDX debug mode is enabled'
+  // Compare the canonical [0:32] commitment; [32:64] is the gpu-cc cap's half.
   const expected = claimsReportData(nonce, docBytes)
-  if (!Buffer.from(p.td.reportData).equals(Buffer.from(expected))) {
+  const rd = p.td.reportData
+  if (rd.length < 32 || !Buffer.from(rd.subarray(0, 32)).equals(Buffer.from(expected))) {
     return 'provider quote report_data does not commit to this claims document'
   }
   return null
@@ -187,11 +205,13 @@ export const providerClaimsCapability: Capability = {
         results.push({ claim, ok: false, detail: bindingFailure })
         continue
       }
+      // A4: an asserted-level pass is a signed self-assertion, NOT an independent
+      // measurement — label it so buyer UIs/policy cannot render it as "verified".
       results.push({
         claim,
         ok: true,
         detail: bindingFailure
-          ? `asserted by provider (integrity/freshness via seller-bound): ${summarize(value)}`
+          ? `provider-asserted only, NOT independently verified (integrity/freshness via seller-bound): ${summarize(value)}`
           : `attested by provider TEE (report_data-bound TDX quote): ${summarize(value)}`,
       })
     }

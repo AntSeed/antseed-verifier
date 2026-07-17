@@ -27,7 +27,10 @@ const PEER = 'f'.repeat(40)
 
 afterEach(() => vi.unstubAllGlobals())
 
-/** A plausible TD10 measurement set; override fields per test. */
+/**
+ * A plausible TD10 measurement set; override fields per test. report_data defaults to the
+ * node cap's binding (SHA-512(nonce ‖ peerId)) so the A1 check passes unless a test overrides it.
+ */
 function td(over: Partial<TdMeasurements> = {}): TdMeasurements {
   return {
     mrTd: new Uint8Array(48).fill(0xaa),
@@ -35,7 +38,7 @@ function td(over: Partial<TdMeasurements> = {}): TdMeasurements {
     rtMr1: new Uint8Array(48),
     rtMr2: new Uint8Array(48),
     rtMr3: new Uint8Array(48),
-    reportData: new Uint8Array(64),
+    reportData: new Uint8Array(computeReportData(NONCE, PEER)),
     debug: false,
     ...over,
   }
@@ -77,6 +80,24 @@ describe('TDX cap verify (seller-node-tee-genuine)', () => {
     const r = await run(nodeTeeCapability, async () => ({ status: 'UpToDate', td: td({ debug: true }) }))
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/debug mode is enabled/)
+  })
+
+  it('A1: rejects a genuine quote whose report_data is not bound to this nonce+peerId', async () => {
+    // A borrowed/relayed/replayed genuine quote — everything checks out EXCEPT the binding.
+    const r = await run(nodeTeeCapability, async () => ({ status: 'UpToDate', td: td({ reportData: new Uint8Array(64) }) }))
+    expect(r.ok).toBe(false)
+    expect(r.detail).toMatch(/report_data is not bound to this nonce\+peerId/)
+  })
+
+  it('A6: rejects SWHardeningNeeded when ANTSEED_VERIFIER_STRICT_TCB=true', async () => {
+    process.env['ANTSEED_VERIFIER_STRICT_TCB'] = 'true'
+    try {
+      const r = await run(nodeTeeCapability, async () => ({ status: 'SWHardeningNeeded', td: td() }))
+      expect(r.ok).toBe(false)
+      expect(r.detail).toMatch(/TCB status not acceptable: SWHardeningNeeded/)
+    } finally {
+      delete process.env['ANTSEED_VERIFIER_STRICT_TCB']
+    }
   })
 
   it('fails (never throws) when DCAP verification throws', async () => {

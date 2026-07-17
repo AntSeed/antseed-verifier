@@ -142,7 +142,21 @@ export function encodeAttestRequest(nonce: Uint8Array, caps: string[]): Uint8Arr
   return new TextEncoder().encode(JSON.stringify(body))
 }
 
+/**
+ * Upper bound on an attestation request/response body before JSON.parse (A8). Both halves
+ * parse counterparty-controlled bytes (the prover reads buyer requests; the buyer reads
+ * seller responses), so a hostile peer must not be able to force an unbounded parse.
+ */
+export const MAX_ATTEST_BODY_BYTES = 512 * 1024
+
+function assertBodySize(body: Uint8Array, what: string): void {
+  if (body.length > MAX_ATTEST_BODY_BYTES) {
+    throw new Error(`${what} exceeds ${MAX_ATTEST_BODY_BYTES} bytes (${body.length})`)
+  }
+}
+
 export function decodeAttestRequest(body: Uint8Array): { nonce: Uint8Array; caps: string[] } {
+  assertBodySize(body, 'attestation request')
   const parsed = JSON.parse(new TextDecoder().decode(body)) as Partial<AttestRequestBody>
   if (typeof parsed.nonce !== 'string' || parsed.nonce.length === 0) {
     throw new Error('attestation request missing "nonce"')
@@ -167,6 +181,7 @@ export function encodeAttestResponse(evidence: Record<string, Uint8Array>): Uint
 }
 
 export function decodeAttestResponse(body: Uint8Array): Record<string, Uint8Array> {
+  assertBodySize(body, 'attestation response')
   const parsed = JSON.parse(new TextDecoder().decode(body)) as Partial<AttestResponseBody>
   if (parsed.evidence === null || typeof parsed.evidence !== 'object') {
     throw new Error('attestation response missing "evidence" object')

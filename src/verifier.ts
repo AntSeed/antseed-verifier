@@ -11,6 +11,8 @@ import {
   type VerifyQuoteFn,
 } from './caps/tee-tdx.js'
 import { PROVIDER_CLAIMS_CAP_ID } from './caps/provider-claims.js'
+import { readFileSync } from 'node:fs'
+import type { MeasuredImagePolicy } from './caps/measured-image.js'
 import {
   NONCE_BYTES,
   VERIFIER_ID,
@@ -52,6 +54,25 @@ const PARSE_SOURCE: Record<string, string> = {
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * A5: buyer measured-image policy. VerifyContext carries no buyer config yet, so the
+ * approved-measurement allow-list is read from ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY —
+ * inline JSON, or "@/path/to/policy.json". Without it, measured-image reports ok:false
+ * ("no approved measurement set configured") exactly as before. Parse failures disable the
+ * policy (never throw the whole round). Replaced by VerifyContext.policy once #713 adds it.
+ */
+export function readMeasuredImagePolicy(): MeasuredImagePolicy | undefined {
+  const raw = process.env['ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY']?.trim()
+  if (!raw) return undefined
+  try {
+    const json = raw.startsWith('@') ? readFileSync(raw.slice(1), 'utf8') : raw
+    return JSON.parse(json) as MeasuredImagePolicy
+  } catch (err) {
+    process.stderr.write(`[verifier] ignoring ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY: ${msg(err)}\n`)
+    return undefined
+  }
 }
 
 /** When we can't even get evidence, fail every required cap with the same reason. */
@@ -108,6 +129,7 @@ export async function runVerify(
 
   // Verify the required caps, any cap the seller returned evidence for, and derived caps.
   const wanted = new Set([...REQUIRED_CAPS, ...Object.keys(evidence), ...DERIVED_CAPS])
+  const measuredImagePolicy = readMeasuredImagePolicy()
   const claims: ClaimResult[] = []
   for (const capId of capabilityIds()) {
     if (!wanted.has(capId)) continue
@@ -115,8 +137,9 @@ export async function runVerify(
     if (!cap) continue
     const source = PARSE_SOURCE[capId]
     const parsed = source ? parsedByCap.get(source) : undefined
+    const policy = capId === MEASURED_IMAGE_ID ? measuredImagePolicy : undefined
     try {
-      const out = await cap.verify({ nonce, peerId, evidence: evidence[capId], parsedQuote: parsed, evidenceBundle: evidence })
+      const out = await cap.verify({ nonce, peerId, evidence: evidence[capId], parsedQuote: parsed, evidenceBundle: evidence, policy })
       claims.push(...(Array.isArray(out) ? out : [out]))
     } catch (err) {
       claims.push({ claim: claimId(capId), ok: false, detail: `verify threw: ${msg(err)}` })

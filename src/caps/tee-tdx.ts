@@ -38,6 +38,18 @@ export function tdxConfigKey(id: string, key: string): string {
  */
 export const ACCEPTABLE_TCB = new Set<string>(['UpToDate', 'SWHardeningNeeded'])
 
+/**
+ * TCB acceptance (A6). UpToDate is always genuine hardware. SWHardeningNeeded flags
+ * guest-side software mitigations only — not a hardware compromise — and is accepted by
+ * default (real GCP TDX quotes routinely report it); set ANTSEED_VERIFIER_STRICT_TCB=true
+ * to require UpToDate exactly.
+ */
+export function isTcbAcceptable(status: string): boolean {
+  if (status === 'UpToDate') return true
+  if (status === 'SWHardeningNeeded') return process.env['ANTSEED_VERIFIER_STRICT_TCB'] !== 'true'
+  return false
+}
+
 /** Authenticated TD10 measurements, extracted from a verified quote. */
 export interface TdMeasurements {
   mrTd: Uint8Array
@@ -174,7 +186,11 @@ function hex(b: Uint8Array): string {
  * own evidence entry independently). collect throws when its source is unavailable
  * (off-TEE for configfs, or no url for http), so the prover simply omits the cap.
  */
-export function makeTdxCap(id: string, defaultSource: 'configfs' | 'http'): Capability {
+export function makeTdxCap(
+  id: string,
+  defaultSource: 'configfs' | 'http',
+  opts?: { bindNoncePeerId?: boolean },
+): Capability {
   return {
     id,
 
@@ -184,9 +200,19 @@ export function makeTdxCap(id: string, defaultSource: 'configfs' | 'http'): Capa
       const p = input.parsedQuote as ParsedTdxQuote | undefined
       if (!p) return { claim, ok: false, detail: 'TDX quote was not verified' }
       if (p.error) return { claim, ok: false, detail: p.error }
-      if (!ACCEPTABLE_TCB.has(p.status)) return { claim, ok: false, detail: `TCB status not acceptable: ${p.status || 'unknown'}` }
+      if (!isTcbAcceptable(p.status)) return { claim, ok: false, detail: `TCB status not acceptable: ${p.status || 'unknown'}` }
       if (!p.td) return { claim, ok: false, detail: 'quote is not an Intel TDX quote' }
       if (p.td.debug === true) return { claim, ok: false, detail: 'TDX debug mode is enabled' }
+      // A1: the locally-minted node quote MUST commit to THIS round's nonce + THIS peer in
+      // report_data. Without this a genuine-but-borrowed/relayed quote (or one static quote
+      // replayed across every nonce) would satisfy a REQUIRED cap. The configfs collector
+      // already mints report_data = SHA-512(nonce ‖ peerId); this enforces it on the buyer.
+      if (opts?.bindNoncePeerId) {
+        const want = computeReportData(input.nonce, input.peerId)
+        if (!p.td.reportData || !Buffer.from(p.td.reportData).equals(want)) {
+          return { claim, ok: false, detail: 'quote report_data is not bound to this nonce+peerId (relayed or replayed quote)' }
+        }
+      }
       return {
         claim,
         ok: true,
@@ -212,7 +238,7 @@ export function makeTdxCap(id: string, defaultSource: 'configfs' | 'http'): Capa
   }
 }
 
-/** The AntSeed seller NODE's own TEE — mints its quote locally via configfs. */
-export const nodeTeeCapability = makeTdxCap(NODE_TEE_CAP_ID, 'configfs')
+/** The AntSeed seller NODE's own TEE — mints its quote locally via configfs; report_data bound to nonce+peerId. */
+export const nodeTeeCapability = makeTdxCap(NODE_TEE_CAP_ID, 'configfs', { bindNoncePeerId: true })
 /** The downstream inference PROVIDER's TEE — quote fetched from the provider's evidence route. */
 export const providerTeeCapability = makeTdxCap(PROVIDER_TEE_CAP_ID, 'http')

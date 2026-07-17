@@ -32,15 +32,19 @@ export {
 } from './caps/index.js'
 
 // Provider-claims: the SDK-frozen claims menu (the per-version claim definitions buyers
-// verify against) + the report_data commitment provider tooling computes when binding a
-// claims document into its TDX quote.
+// verify against) + the canonical provider report_data scheme (domain tag + the [0:32]
+// commitment provider tooling computes when binding a claims document into its TDX quote).
 export {
   PROVIDER_CLAIMS_CAP_ID,
   PROVIDER_CLAIMS_MENU,
+  PROVIDER_REPORT_DATA_DOMAIN,
   claimsConfigKey,
   claimsReportData,
 } from './caps/provider-claims.js'
 export type { ProviderClaimDefinition } from './caps/provider-claims.js'
+
+// Buyer measured-image policy loader (A5 interim; replaced by VerifyContext.policy in #713).
+export { readMeasuredImagePolicy } from './verifier.js'
 
 // Buyer-side orchestration + the injectable DCAP seam (useful for tooling/tests).
 export { runVerify } from './verifier.js'
@@ -48,6 +52,7 @@ export {
   makeTdxCap,
   defaultVerifyQuote,
   verifyTdxEvidence,
+  isTcbAcceptable,
   NODE_TEE_CAP_ID,
   PROVIDER_TEE_CAP_ID,
 } from './caps/tee-tdx.js'

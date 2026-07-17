@@ -23,14 +23,21 @@ function doc(claims: Record<string, unknown>, version: unknown = 1): Uint8Array 
   return new TextEncoder().encode(JSON.stringify({ version, claims }))
 }
 
-function td(reportData: Uint8Array, over: Partial<TdMeasurements> = {}): TdMeasurements {
+/** Real TDX report_data is 64 bytes; the canonical provider commitment occupies [0:32]. */
+function rd64(commitment: Uint8Array): Uint8Array {
+  const out = new Uint8Array(64)
+  out.set(commitment.subarray(0, 32), 0)
+  return out
+}
+
+function td(commitment: Uint8Array, over: Partial<TdMeasurements> = {}): TdMeasurements {
   return {
     mrTd: new Uint8Array(48).fill(7),
     rtMr0: new Uint8Array(48),
     rtMr1: new Uint8Array(48),
     rtMr2: new Uint8Array(48),
     rtMr3: new Uint8Array(48),
-    reportData,
+    reportData: rd64(commitment),
     debug: false,
     ...over,
   }
@@ -55,10 +62,10 @@ const find = (claims: ClaimResult[], id: string): ClaimResult | undefined =>
 afterEach(() => vi.unstubAllGlobals())
 
 describe('claimsReportData', () => {
-  it('is 64 bytes (the TDX REPORTDATA size) and binds both nonce and document', () => {
+  it('is the 32-byte report_data[0:32] commitment and binds both nonce and document', () => {
     const bytes = doc({ 'model-id': 'm' })
     const rd = claimsReportData(NONCE, bytes)
-    expect(rd.length).toBe(64)
+    expect(rd.length).toBe(32)
     expect(Buffer.from(claimsReportData(NONCE, bytes)).equals(rd)).toBe(true)
     expect(Buffer.from(claimsReportData(randomBytes(32), bytes)).equals(rd)).toBe(false)
     expect(Buffer.from(claimsReportData(NONCE, doc({ 'model-id': 'other' }))).equals(rd)).toBe(false)
@@ -146,7 +153,7 @@ describe('providerClaimsCapability.verify — proof requirements are frozen per 
     const r = await verify(doc({ 'model-id': 'llama-3.1-70b' }))
     const c = find(r, child('model-id'))
     expect(c?.ok).toBe(true)
-    expect(c?.detail).toMatch(/asserted by provider/)
+    expect(c?.detail).toMatch(/provider-asserted only, NOT independently verified/)
     expect(c?.detail).toContain('llama-3.1-70b')
   })
 

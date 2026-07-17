@@ -58,11 +58,23 @@ capabilities its infrastructure supports; the buyer verifies each:
   ```
 
   Frozen proof levels: `asserted` (may pass on whole-bundle `seller-bound` integrity
-  alone) and `tdx-quote` (passes ONLY when the provider's DCAP-verified TDX quote
-  commits to the exact document bytes + round nonce via
-  `report_data = SHA-512(nonce ‖ documentBytes)` — helper: `claimsReportData`; a bound
-  document upgrades asserted-level claims to TEE-attested too). v0.1 menu: `model-id`
-  (asserted) and `serving-image-digest` (tdx-quote). Informational, never required.
+  alone — reported as "provider-asserted only, NOT independently verified") and
+  `tdx-quote` (passes ONLY when the provider's DCAP-verified TDX quote commits to the
+  exact document in its `report_data`; a bound document upgrades asserted-level claims
+  to TEE-attested too). v0.1 menu: `model-id` (asserted) and `serving-image-digest`
+  (tdx-quote). Informational, never required.
+
+  The provider quote uses ONE canonical 64-byte `report_data` layout (domain-separated,
+  so a single provider quote serves every provider cap at once):
+
+  ```
+  report_data[ 0:32] = SHA-256( "antseed-provider-report-data-v1" ‖ nonce ‖ SHA-256(claimsDocBytes) )
+  report_data[32:64] = SHA-256( gpuEvidenceBytes )   // reserved for the gpu-cc cap
+  ```
+
+  `claimsReportData(nonce, docBytes)` returns the 32-byte `[0:32]` commitment; the buyer
+  compares it against the provider quote's first half. (The node cap keeps its own
+  `SHA-512(nonce ‖ peerId)` — it binds identity, not a payload.)
 
 The buyer requires `seller-node-tee-genuine` and `seller-bound`; the rest are
 reported informationally. Provider differences are handled only by generic,
@@ -116,7 +128,19 @@ values:
 - `ANTSEED_VERIFIER_SIGNING_KEY` — the seller identity key (hex) that produces
   `seller-bound` signatures; the cap is disabled if its address != the peer id.
 
-The verifier half has no special hardware requirement.
+The verifier (buyer) half has no special hardware requirement, and reads two optional
+policy knobs from the environment:
+
+- `ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY` — the `seller-provider-measured-image`
+  allow-list, as inline JSON (`{"approvedMeasurements":[{"mrtd":"…"}]}`) or `@/path.json`.
+  Without it the cap reports `ok:false` ("no approved measurement set configured"). Interim
+  until `@antseed/node`'s `VerifyContext` carries buyer policy.
+- `ANTSEED_VERIFIER_STRICT_TCB` — set to `true` to require TCB status exactly `UpToDate`
+  (rejecting `SWHardeningNeeded`). Default accepts both.
+
+The buyer also enforces that the seller **node** quote's `report_data` equals
+`SHA-512(nonce ‖ peerId)`, so a genuine-but-borrowed or replayed quote cannot satisfy the
+required `seller-node-tee-genuine` cap.
 
 ## Build and test
 
