@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
+import { antseedRdV1 } from './report-data.js'
 import {
   NONCE_BYTES,
   VERIFIER_ID,
@@ -34,12 +35,11 @@ describe('claimId', () => {
 })
 
 describe('computeReportData', () => {
-  it('is 64 bytes and equals SHA-512(nonce ‖ utf8(peerId))', () => {
+  it('is 64 bytes and equals the antseed-rd-v1 {peerId} instance', () => {
     const nonce = randomBytes(NONCE_BYTES)
     const rd = computeReportData(nonce, PEER)
     expect(rd.length).toBe(64)
-    const expected = createHash('sha512').update(Buffer.from(nonce)).update(Buffer.from(PEER, 'utf8')).digest()
-    expect(Buffer.from(rd).equals(expected)).toBe(true)
+    expect(Buffer.from(rd).equals(antseedRdV1.build(nonce, { peerId: PEER }))).toBe(true)
   })
   it('normalizes peer id casing so both sides agree', () => {
     const nonce = randomBytes(NONCE_BYTES)

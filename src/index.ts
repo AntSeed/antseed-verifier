@@ -46,6 +46,19 @@ export type { ProviderClaimDefinition } from './caps/provider-claims.js'
 // Buyer measured-image policy loader (A5 interim; replaced by VerifyContext.policy in #713).
 export { readMeasuredImagePolicy } from './verifier.js'
 
+// Report_data binding schemes — the frozen registry the buyer verifies provider quotes against.
+// antseedRdV1 is our canonical compositional scheme (the node cap is its {peerId} instance);
+// noncePubkeySha256V1 is the foreign Chutes construction, replicated only to verify their quotes.
+export {
+  antseedRdV1,
+  noncePubkeySha256V1,
+  getReportDataScheme,
+  verifyReportData,
+  REPORT_DATA_SCHEMES,
+} from './report-data.js'
+export type { ReportDataScheme, BindingIngredients } from './report-data.js'
+export type { ReportDataBinding } from './caps/tee-tdx.js'
+
 // Buyer-side orchestration + the injectable DCAP seam (useful for tooling/tests).
 export { runVerify } from './verifier.js'
 export {

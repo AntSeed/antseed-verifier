@@ -21,6 +21,7 @@ import {
 } from './tee-tdx.js'
 import type { Capability } from '../capability.js'
 import { claimId, computeReportData } from '../shared.js'
+import { noncePubkeySha256V1 } from '../report-data.js'
 
 const NONCE = randomBytes(32)
 const PEER = 'f'.repeat(40)
@@ -86,7 +87,7 @@ describe('TDX cap verify (seller-node-tee-genuine)', () => {
     // A borrowed/relayed/replayed genuine quote — everything checks out EXCEPT the binding.
     const r = await run(nodeTeeCapability, async () => ({ status: 'UpToDate', td: td({ reportData: new Uint8Array(64) }) }))
     expect(r.ok).toBe(false)
-    expect(r.detail).toMatch(/report_data is not bound to this nonce\+peerId/)
+    expect(r.detail).toMatch(/does not match scheme "antseed-rd-v1"/)
   })
 
   it('A6: rejects SWHardeningNeeded when ANTSEED_VERIFIER_STRICT_TCB=true', async () => {
@@ -116,6 +117,39 @@ describe('TDX cap verify (seller-node-tee-genuine)', () => {
     const r = nodeTeeCapability.verify({ nonce: NONCE, peerId: PEER })
     expect(r).toMatchObject({ claim: CLAIM, ok: false })
     expect((r as { detail: string }).detail).toMatch(/no TDX quote/)
+  })
+})
+
+// The provider cap verifies a foreign report_data scheme declared in the evidence (Chutes flow).
+describe('provider cap — declared report_data scheme binding', () => {
+  const now = Math.floor(Date.now() / 1000)
+  const PUBKEY = Buffer.from(randomBytes(32)).toString('base64')
+  // Stub DCAP that reflects the quote bytes as report_data (real DCAP reads them from the quote).
+  const reflect: VerifyQuoteFn = async (quote) => ({
+    status: 'UpToDate',
+    td: td({ reportData: quote.length >= 64 ? new Uint8Array(quote.subarray(0, 64)) : new Uint8Array(64) }),
+  })
+
+  it('passes when the provider quote report_data matches the declared scheme + ingredients', async () => {
+    const rd = noncePubkeySha256V1.build(NONCE, { e2ePubkey: PUBKEY }) // commitment in [0:32]
+    const ev = encodeTeeTdxEvidence(rd, undefined, { scheme: 'nonce-pubkey-sha256-v1', ingredients: { e2ePubkey: PUBKEY } })
+    const parsed = await verifyTdxEvidence(ev, reflect, now)
+    const r = await providerTeeCapability.verify({ nonce: NONCE, peerId: PEER, evidence: ev, parsedQuote: parsed })
+    expect(r.ok).toBe(true)
+  })
+
+  it('fails closed when report_data does not match the declared scheme (wrong pubkey / relayed quote)', async () => {
+    const rd = noncePubkeySha256V1.build(NONCE, { e2ePubkey: PUBKEY })
+    const ev = encodeTeeTdxEvidence(rd, undefined, { scheme: 'nonce-pubkey-sha256-v1', ingredients: { e2ePubkey: 'AAAA' } })
+    const parsed = await verifyTdxEvidence(ev, reflect, now)
+    const r = await providerTeeCapability.verify({ nonce: NONCE, peerId: PEER, evidence: ev, parsedQuote: parsed })
+    expect(r.ok).toBe(false)
+    expect(r.detail).toMatch(/does not match scheme/)
+  })
+
+  it('with no declared scheme, stays genuineness-only (backward compatible)', async () => {
+    const r = await run(providerTeeCapability, async () => ({ status: 'UpToDate', td: td() }))
+    expect(r.ok).toBe(true) // no binding on the evidence → report_data not checked
   })
 })
 

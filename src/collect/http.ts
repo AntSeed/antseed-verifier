@@ -20,6 +20,28 @@ function pluck(obj: unknown, path: string): unknown {
   }, obj)
 }
 
+/**
+ * Like collectViaHttp, but returns the field's raw STRING (no base64 decode). Used to pull a
+ * report_data-binding ingredient (e.g. the provider's E2E public key) from the evidence route.
+ */
+export async function collectStringViaHttp(
+  urlTemplate: string,
+  nonce: Uint8Array,
+  field: string,
+): Promise<string> {
+  const url = urlTemplate.replace(/\{nonce\}/g, Buffer.from(nonce).toString('hex'))
+  const resp = await fetch(url)
+  if (!resp.ok) {
+    throw new Error(`http attestation endpoint returned HTTP ${resp.status}`)
+  }
+  const json: unknown = await resp.json()
+  const value = pluck(json, field)
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`http attestation response has no string at "${field}"`)
+  }
+  return value
+}
+
 export async function collectViaHttp(
   urlTemplate: string,
   nonce: Uint8Array,

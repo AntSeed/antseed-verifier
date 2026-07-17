@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { keccak_256 } from '@noble/hashes/sha3.js'
+import { antseedRdV1 } from './report-data.js'
 
 /**
  * Shared constants + wire codecs used by BOTH halves of the SDK (buyer verifier
@@ -45,21 +46,14 @@ export function normalizePeerId(peerId: string): string {
 }
 
 /**
- * report_data binding scheme (64 bytes = the TDX REPORTDATA field size):
- *
- *   report_data = SHA-512( nonce(32 raw bytes) || utf8(peerId) )
- *
- * Used by the self-hosted (configfs) collector to bind the quote it mints to both
- * freshness and identity at generation time. Providers that hand back a pre-made
- * quote (http collector) bind their own report_data (often a provider key); in that
- * case the freshness+identity binding is carried by the seller-bound capability
- * instead, which is why this stays a helper rather than a hard requirement.
+ * The seller NODE's report_data binding: the {peerId} instance of the canonical
+ * compositional scheme `antseed-rd-v1` (see report-data.ts). Binds this round's nonce +
+ * the seller identity, and the configfs collector mints exactly this so the buyer's node
+ * cap can recompute and enforce it. Kept as a named helper because both the collector and
+ * the node-cap verify reference "the node binding" specifically.
  */
 export function computeReportData(nonce: Uint8Array, peerId: string): Buffer {
-  const h = createHash('sha512')
-  h.update(Buffer.from(nonce))
-  h.update(Buffer.from(normalizePeerId(peerId), 'utf8'))
-  return h.digest() // 64 bytes
+  return Buffer.from(antseedRdV1.build(nonce, { peerId: normalizePeerId(peerId) }))
 }
 
 /** The dependent capability whose own evidence is EXCLUDED from the bundle it signs over. */

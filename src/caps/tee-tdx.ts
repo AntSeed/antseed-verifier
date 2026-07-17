@@ -2,7 +2,14 @@ import type { ClaimResult } from '@antseed/node'
 import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '../capability.js'
 import { claimId, computeReportData } from '../shared.js'
 import { generateTdxQuote } from '../collect/configfs.js'
-import { collectViaHttp } from '../collect/http.js'
+import { collectViaHttp, collectStringViaHttp } from '../collect/http.js'
+import { antseedRdV1, verifyReportData, type BindingIngredients } from '../report-data.js'
+
+/** A provider quote's declared report_data binding: a frozen scheme id + its string ingredients. */
+export interface ReportDataBinding {
+  scheme: string
+  ingredients: Pick<BindingIngredients, 'peerId' | 'e2ePubkey'>
+}
 
 /**
  * A genuine-Intel-TDX capability: proves a party runs in a genuine Intel TDX enclave.
@@ -85,25 +92,29 @@ export interface ParsedTdxQuote {
   quoteEvidence: Uint8Array
   status: string
   td: TdMeasurements | null
+  /** The provider-declared report_data binding, if the evidence carried one. */
+  binding?: ReportDataBinding
   /** Set when DCAP verification or evidence decoding threw. */
   error?: string
 }
 
-/** tee-tdx evidence blob: the raw quote (b64) plus optional DCAP collateral. */
+/** tee-tdx evidence blob: the raw quote (b64), optional DCAP collateral, optional binding. */
 interface TeeTdxEvidence {
   quote: string
   collateral?: unknown
+  binding?: ReportDataBinding
 }
 
-export function encodeTeeTdxEvidence(quote: Uint8Array, collateral?: unknown): Uint8Array {
+export function encodeTeeTdxEvidence(quote: Uint8Array, collateral?: unknown, binding?: ReportDataBinding): Uint8Array {
   const blob: TeeTdxEvidence = {
     quote: Buffer.from(quote).toString('base64'),
     ...(collateral !== undefined ? { collateral } : {}),
+    ...(binding !== undefined ? { binding } : {}),
   }
   return new TextEncoder().encode(JSON.stringify(blob))
 }
 
-export function decodeTeeTdxEvidence(bytes: Uint8Array): { quote: Uint8Array; collateral?: unknown } {
+export function decodeTeeTdxEvidence(bytes: Uint8Array): { quote: Uint8Array; collateral?: unknown; binding?: ReportDataBinding } {
   const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<TeeTdxEvidence>
   if (typeof parsed.quote !== 'string' || parsed.quote.length === 0) {
     throw new Error('tee-tdx evidence missing "quote"')
@@ -112,7 +123,11 @@ export function decodeTeeTdxEvidence(bytes: Uint8Array): { quote: Uint8Array; co
   if (quote.length === 0) {
     throw new Error('tee-tdx evidence "quote" is not valid base64')
   }
-  return { quote, ...(parsed.collateral !== undefined ? { collateral: parsed.collateral } : {}) }
+  return {
+    quote,
+    ...(parsed.collateral !== undefined ? { collateral: parsed.collateral } : {}),
+    ...(parsed.binding !== undefined ? { binding: parsed.binding } : {}),
+  }
 }
 
 /**
@@ -156,16 +171,17 @@ export async function verifyTdxEvidence(
 ): Promise<ParsedTdxQuote> {
   let quote: Uint8Array
   let collateral: unknown
+  let binding: ReportDataBinding | undefined
   try {
-    ;({ quote, collateral } = decodeTeeTdxEvidence(evidence))
+    ;({ quote, collateral, binding } = decodeTeeTdxEvidence(evidence))
   } catch (err) {
     return { quoteEvidence: evidence, status: '', td: null, error: `malformed tee-tdx evidence: ${msg(err)}` }
   }
   try {
     const raw = await verifyQuote(quote, collateral, nowSecs)
-    return { quoteEvidence: evidence, status: raw.status, td: raw.td }
+    return { quoteEvidence: evidence, status: raw.status, td: raw.td, ...(binding ? { binding } : {}) }
   } catch (err) {
-    return { quoteEvidence: evidence, status: '', td: null, error: `quote verification failed: ${msg(err)}` }
+    return { quoteEvidence: evidence, status: '', td: null, ...(binding ? { binding } : {}), error: `quote verification failed: ${msg(err)}` }
   }
 }
 
@@ -207,11 +223,16 @@ export function makeTdxCap(
       // report_data. Without this a genuine-but-borrowed/relayed quote (or one static quote
       // replayed across every nonce) would satisfy a REQUIRED cap. The configfs collector
       // already mints report_data = SHA-512(nonce ‖ peerId); this enforces it on the buyer.
-      if (opts?.bindNoncePeerId) {
-        const want = computeReportData(input.nonce, input.peerId)
-        if (!p.td.reportData || !Buffer.from(p.td.reportData).equals(want)) {
-          return { claim, ok: false, detail: 'quote report_data is not bound to this nonce+peerId (relayed or replayed quote)' }
-        }
+      // report_data binding. The node cap binds its {peerId} identity (antseed-rd-v1); a
+      // provider cap verifies whatever frozen scheme its evidence declares (absent → genuineness
+      // only, unchanged). Fail closed: a borrowed/relayed/stale quote can't match a fresh-nonce
+      // commitment, so this is what turns "some genuine quote" into "this instance, this round".
+      const binding: ReportDataBinding | undefined = opts?.bindNoncePeerId
+        ? { scheme: antseedRdV1.id, ingredients: { peerId: input.peerId } }
+        : p.binding
+      if (binding) {
+        const bad = verifyReportData(binding.scheme, p.td.reportData, input.nonce, binding.ingredients)
+        if (bad) return { claim, ok: false, detail: bad }
       }
       return {
         claim,
@@ -231,6 +252,16 @@ export function makeTdxCap(
         if (!url) throw new Error(`${id} http source requires an evidence url; not offered`)
         const field = input.config[tdxConfigKey(id, 'field')] ?? 'quote'
         const quote = await collectViaHttp(url, input.nonce, field)
+        // Optionally declare the provider's frozen report_data scheme + its ingredients (e.g.
+        // the E2E pubkey), so the buyer can verify the quote is bound to THIS round + instance.
+        const scheme = input.config[tdxConfigKey(id, 'binding.scheme')]
+        if (scheme) {
+          const pubkeyField = input.config[tdxConfigKey(id, 'binding.pubkeyField')]
+          const ingredients = pubkeyField
+            ? { e2ePubkey: await collectStringViaHttp(url, input.nonce, pubkeyField) }
+            : {}
+          return encodeTeeTdxEvidence(quote, undefined, { scheme, ingredients })
+        }
         return encodeTeeTdxEvidence(quote)
       }
       throw new Error(`unknown ${id} source "${source}" (expected "configfs" or "http")`)

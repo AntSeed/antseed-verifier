@@ -125,6 +125,11 @@ values:
 - `ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD` — the JSON field of that route's response
   holding the base64 provider claims document; when set (with the evidence URL),
   `seller-provider-claims` is offered off the same route.
+- `ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME` — the frozen `report_data` scheme the
+  provider's quote uses (`antseed-rd-v1`, or `nonce-pubkey-sha256-v1` for a Chutes-style
+  E2E provider). When set, the buyer verifies the provider quote is bound to this round.
+- `ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD` — the JSON field holding the provider's
+  base64 E2E public key, the ingredient the scheme binds.
 - `ANTSEED_VERIFIER_SIGNING_KEY` — the seller identity key (hex) that produces
   `seller-bound` signatures; the cap is disabled if its address != the peer id.
 
@@ -138,9 +143,25 @@ policy knobs from the environment:
 - `ANTSEED_VERIFIER_STRICT_TCB` — set to `true` to require TCB status exactly `UpToDate`
   (rejecting `SWHardeningNeeded`). Default accepts both.
 
-The buyer also enforces that the seller **node** quote's `report_data` equals
-`SHA-512(nonce ‖ peerId)`, so a genuine-but-borrowed or replayed quote cannot satisfy the
-required `seller-node-tee-genuine` cap.
+### report_data binding schemes
+
+A TDX quote has one 64-byte `report_data`; how a provider commits this round's freshness
+(and any TEE-bound key) into it varies by stack. The SDK verifies against a **frozen,
+version-pinned registry** of schemes (`src/report-data.ts`) — a provider *selects* one by id,
+never defines one:
+
+- **`antseed-rd-v1`** — our canonical, *compositional* scheme: the nonce is always bound, and
+  optional fields (`peerId`, `e2ePubkey`, …) are included iff present, each domain-tagged and
+  length-prefixed. One rule covers every combination, and the seller **node** cap is simply its
+  `{peerId}` instance — so a genuine-but-borrowed or replayed quote cannot satisfy the required
+  `seller-node-tee-genuine` cap.
+- **`nonce-pubkey-sha256-v1`** — the foreign Chutes construction
+  (`SHA-256(nonce_hex ‖ e2ePubkey_b64)`), replicated only so the buyer can verify a quote
+  Chutes minted. Opt-in per provider via `ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME`.
+
+The same builder runs on the prover (to mint) and the buyer (to recompute), and because the
+nonce is always bound, a mis-declared or downgraded field set can only fail — never falsely
+pass. See `docs/e2e-report-data-schemes.md` for the end-to-end test flows (standard + Chutes).
 
 ## Build and test
 

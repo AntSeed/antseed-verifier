@@ -31,6 +31,11 @@ import {
  *   ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD JSON field holding the provider's base64 claims document;
  *                                          when set (with the evidence URL), seller-provider-claims
  *                                          is offered off the SAME route
+ *   ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME       frozen report_data scheme the provider's quote uses
+ *                                          (e.g. "nonce-pubkey-sha256-v1" for Chutes); when set, the
+ *                                          buyer verifies the provider quote is bound to this round
+ *   ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD JSON field holding the provider's base64 E2E pubkey,
+ *                                          the ingredient that scheme binds
  *   ANTSEED_VERIFIER_SIGNING_KEY           seller identity private key (hex) for seller-bound
  */
 
@@ -41,6 +46,8 @@ const PROVIDER_EVIDENCE_URL = 'ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL'
 const PROVIDER_TEE_FIELD = 'ANTSEED_VERIFIER_PROVIDER_TEE_FIELD'
 const PROVIDER_GPU_FIELD = 'ANTSEED_VERIFIER_PROVIDER_GPU_FIELD'
 const PROVIDER_CLAIMS_FIELD = 'ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD'
+const PROVIDER_BINDING_SCHEME = 'ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME'
+const PROVIDER_BINDING_PUBKEY_FIELD = 'ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD'
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -69,6 +76,14 @@ function baseConfig(): Record<string, string> {
     cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'source')] = 'http'
     cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'url')] = provUrl
     cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'field')] = process.env[PROVIDER_TEE_FIELD]?.trim() || 'quote'
+    // Optional: declare the provider's frozen report_data scheme so the buyer verifies the
+    // provider quote is bound to THIS round + instance (e.g. Chutes' nonce-pubkey-sha256-v1).
+    const bindingScheme = process.env[PROVIDER_BINDING_SCHEME]?.trim()
+    if (bindingScheme) {
+      cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'binding.scheme')] = bindingScheme
+      const pubkeyField = process.env[PROVIDER_BINDING_PUBKEY_FIELD]?.trim()
+      if (pubkeyField) cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'binding.pubkeyField')] = pubkeyField
+    }
     // seller-provider-gpu-cc: same evidence route, but only offered when a GPU field is named.
     const gpuField = process.env[PROVIDER_GPU_FIELD]?.trim()
     if (gpuField) {
