@@ -46,11 +46,9 @@ export function normalizePeerId(peerId: string): string {
 }
 
 /**
- * The seller NODE's report_data binding: the {peerId} instance of the canonical
- * compositional scheme `antseed-rd-v1` (see report-data.ts). Binds this round's nonce +
- * the seller identity, and the configfs collector mints exactly this so the buyer's node
- * cap can recompute and enforce it. Kept as a named helper because both the collector and
- * the node-cap verify reference "the node binding" specifically.
+ * The seller NODE's report_data binding: the {peerId} instance of the compositional scheme
+ * `antseed-rd-v1` (see report-data.ts). The configfs collector mints exactly this, so the
+ * buyer's node cap recomputes and enforces the same bytes.
  */
 export function computeReportData(nonce: Uint8Array, peerId: string): Buffer {
   return Buffer.from(antseedRdV1.build(nonce, { peerId: normalizePeerId(peerId) }))
@@ -137,7 +135,7 @@ export function encodeAttestRequest(nonce: Uint8Array, caps: string[]): Uint8Arr
 }
 
 /**
- * Upper bound on an attestation request/response body before JSON.parse (A8). Both halves
+ * Upper bound on an attestation request/response body before JSON.parse. Both halves
  * parse counterparty-controlled bytes (the prover reads buyer requests; the buyer reads
  * seller responses), so a hostile peer must not be able to force an unbounded parse.
  */

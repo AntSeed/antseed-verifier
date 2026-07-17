@@ -30,7 +30,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 /**
  * A plausible TD10 measurement set; override fields per test. report_data defaults to the
- * node cap's binding (SHA-512(nonce ‖ peerId)) so the A1 check passes unless a test overrides it.
+ * node cap's antseed-rd-v1 {peerId} binding, so the node binding check passes unless a test overrides it.
  */
 function td(over: Partial<TdMeasurements> = {}): TdMeasurements {
   return {
@@ -83,14 +83,14 @@ describe('TDX cap verify (seller-node-tee-genuine)', () => {
     expect(r.detail).toMatch(/debug mode is enabled/)
   })
 
-  it('A1: rejects a genuine quote whose report_data is not bound to this nonce+peerId', async () => {
+  it('rejects a genuine quote whose report_data is not bound to this nonce+peerId', async () => {
     // A borrowed/relayed/replayed genuine quote — everything checks out EXCEPT the binding.
     const r = await run(nodeTeeCapability, async () => ({ status: 'UpToDate', td: td({ reportData: new Uint8Array(64) }) }))
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/does not match scheme "antseed-rd-v1"/)
   })
 
-  it('A6: rejects SWHardeningNeeded when ANTSEED_VERIFIER_STRICT_TCB=true', async () => {
+  it('rejects SWHardeningNeeded when ANTSEED_VERIFIER_STRICT_TCB=true', async () => {
     process.env['ANTSEED_VERIFIER_STRICT_TCB'] = 'true'
     try {
       const r = await run(nodeTeeCapability, async () => ({ status: 'SWHardeningNeeded', td: td() }))
@@ -147,7 +147,7 @@ describe('provider cap — declared report_data scheme binding', () => {
     expect(r.detail).toMatch(/does not match scheme/)
   })
 
-  it('with no declared scheme, stays genuineness-only (backward compatible)', async () => {
+  it('with no declared scheme, stays genuineness-only', async () => {
     const r = await run(providerTeeCapability, async () => ({ status: 'UpToDate', td: td() }))
     expect(r.ok).toBe(true) // no binding on the evidence → report_data not checked
   })

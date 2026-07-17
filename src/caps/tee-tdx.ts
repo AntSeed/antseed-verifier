@@ -2,7 +2,7 @@ import type { ClaimResult } from '@antseed/node'
 import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '../capability.js'
 import { claimId, computeReportData } from '../shared.js'
 import { generateTdxQuote } from '../collect/configfs.js'
-import { collectViaHttp, collectStringViaHttp } from '../collect/http.js'
+import { collectViaHttp, collectTdxAndPubkey } from '../collect/http.js'
 import { antseedRdV1, verifyReportData, type BindingIngredients } from '../report-data.js'
 
 /** A provider quote's declared report_data binding: a frozen scheme id + its string ingredients. */
@@ -46,7 +46,7 @@ export function tdxConfigKey(id: string, key: string): string {
 export const ACCEPTABLE_TCB = new Set<string>(['UpToDate', 'SWHardeningNeeded'])
 
 /**
- * TCB acceptance (A6). UpToDate is always genuine hardware. SWHardeningNeeded flags
+ * TCB acceptance. UpToDate is always genuine hardware. SWHardeningNeeded flags
  * guest-side software mitigations only — not a hardware compromise — and is accepted by
  * default (real GCP TDX quotes routinely report it); set ANTSEED_VERIFIER_STRICT_TCB=true
  * to require UpToDate exactly.
@@ -219,14 +219,10 @@ export function makeTdxCap(
       if (!isTcbAcceptable(p.status)) return { claim, ok: false, detail: `TCB status not acceptable: ${p.status || 'unknown'}` }
       if (!p.td) return { claim, ok: false, detail: 'quote is not an Intel TDX quote' }
       if (p.td.debug === true) return { claim, ok: false, detail: 'TDX debug mode is enabled' }
-      // A1: the locally-minted node quote MUST commit to THIS round's nonce + THIS peer in
-      // report_data. Without this a genuine-but-borrowed/relayed quote (or one static quote
-      // replayed across every nonce) would satisfy a REQUIRED cap. The configfs collector
-      // already mints report_data = SHA-512(nonce ‖ peerId); this enforces it on the buyer.
-      // report_data binding. The node cap binds its {peerId} identity (antseed-rd-v1); a
-      // provider cap verifies whatever frozen scheme its evidence declares (absent → genuineness
-      // only, unchanged). Fail closed: a borrowed/relayed/stale quote can't match a fresh-nonce
-      // commitment, so this is what turns "some genuine quote" into "this instance, this round".
+      // Bind report_data to this round: the node cap to its {peerId} identity, a provider cap
+      // to whatever frozen scheme its evidence declares. Fail-closed — a borrowed/relayed/stale
+      // quote can't match a fresh-nonce commitment. A provider quote with NO declared scheme
+      // still passes on genuineness, but its detail must disclose that freshness was not proven.
       const binding: ReportDataBinding | undefined = opts?.bindNoncePeerId
         ? { scheme: antseedRdV1.id, ingredients: { peerId: input.peerId } }
         : p.binding
@@ -234,10 +230,13 @@ export function makeTdxCap(
         const bad = verifyReportData(binding.scheme, p.td.reportData, input.nonce, binding.ingredients)
         if (bad) return { claim, ok: false, detail: bad }
       }
+      const freshness = binding
+        ? `bound to this round (${binding.scheme})`
+        : 'freshness/instance binding NOT verified (no report_data scheme declared)'
       return {
         claim,
         ok: true,
-        detail: `genuine Intel TDX quote (TCB ${p.status}); MRTD ${hex(p.td.mrTd).slice(0, 16)}…`,
+        detail: `genuine Intel TDX quote (TCB ${p.status}); MRTD ${hex(p.td.mrTd).slice(0, 16)}…; ${freshness}`,
       }
     },
 
@@ -251,18 +250,17 @@ export function makeTdxCap(
         const url = input.config[tdxConfigKey(id, 'url')]
         if (!url) throw new Error(`${id} http source requires an evidence url; not offered`)
         const field = input.config[tdxConfigKey(id, 'field')] ?? 'quote'
-        const quote = await collectViaHttp(url, input.nonce, field)
-        // Optionally declare the provider's frozen report_data scheme + its ingredients (e.g.
-        // the E2E pubkey), so the buyer can verify the quote is bound to THIS round + instance.
         const scheme = input.config[tdxConfigKey(id, 'binding.scheme')]
-        if (scheme) {
-          const pubkeyField = input.config[tdxConfigKey(id, 'binding.pubkeyField')]
-          const ingredients = pubkeyField
-            ? { e2ePubkey: await collectStringViaHttp(url, input.nonce, pubkeyField) }
-            : {}
-          return encodeTeeTdxEvidence(quote, undefined, { scheme, ingredients })
+        if (!scheme) {
+          return encodeTeeTdxEvidence(await collectViaHttp(url, input.nonce, field))
         }
-        return encodeTeeTdxEvidence(quote)
+        // Declare the provider's frozen report_data scheme + its ingredients (e.g. the E2E
+        // pubkey) so the buyer can verify the quote is bound to this round. Both come from ONE
+        // fetch so the quote and the pubkey are from the same response (no cross-fetch skew).
+        const pubkeyField = input.config[tdxConfigKey(id, 'binding.pubkeyField')]
+        const { quote, pubkey } = await collectTdxAndPubkey(url, input.nonce, field, pubkeyField)
+        const ingredients = pubkey ? { e2ePubkey: pubkey } : {}
+        return encodeTeeTdxEvidence(quote, undefined, { scheme, ingredients })
       }
       throw new Error(`unknown ${id} source "${source}" (expected "configfs" or "http")`)
     },

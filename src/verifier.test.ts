@@ -41,7 +41,7 @@ function td(over: Partial<TdMeasurements> = {}): TdMeasurements {
 
 /**
  * Stub DCAP: genuine TDX, current TCB, reflecting the quote bytes back as report_data so a
- * test can mint a quote whose report_data satisfies the A1 node binding or the provider
+ * test can mint a quote whose report_data satisfies the node binding or the provider
  * claims binding just by choosing the quote bytes. (Real DCAP reads report_data from the
  * signed quote; here the "quote" IS the 64-byte report_data.)
  */
@@ -50,7 +50,7 @@ const okVerify: VerifyQuoteFn = async (quote) => ({
   td: td({ reportData: quote.length === 64 ? new Uint8Array(quote) : new Uint8Array(64) }),
 })
 
-/** A node quote bound to (nonce, PEER) — satisfies the A1 report_data check under okVerify. */
+/** A node quote bound to (nonce, PEER) — satisfies the node binding check under okVerify. */
 const boundNodeQuote = (nonce: Uint8Array): Uint8Array => new Uint8Array(computeReportData(nonce, PEER))
 /** A 64-byte provider report_data carrying a 32-byte commitment in [0:32]. */
 const rd64 = (commitment: Uint8Array): Uint8Array => {
@@ -190,7 +190,7 @@ describe('runVerify — provider claims (one ClaimResult per sub-claim)', () => 
   })
 })
 
-describe('runVerify — measured-image policy from env (A5)', () => {
+describe('runVerify — measured-image policy from env', () => {
   const MRTD = '07'.repeat(48) // matches the stub provider quote's td.mrTd below
 
   it('passes measured-image when an approved measurement is supplied via env', async () => {

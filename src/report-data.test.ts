@@ -34,14 +34,13 @@ describe('antseed-rd-v1 (compositional)', () => {
 
   it('the node cap is the {peerId} instance', () => {
     const rd = antseedRdV1.build(NONCE, { peerId: PEER })
-    // domain ‖ nonce ‖ tag(0x01) ‖ len(20) ‖ 20-byte address
-    const len = Buffer.alloc(4); len.writeUInt32BE(20, 0)
+    // domain ‖ len(nonce)‖nonce ‖ tag(0x01) ‖ len(20)‖20-byte-address
+    const lp = (b: Buffer) => { const l = Buffer.alloc(4); l.writeUInt32BE(b.length, 0); return Buffer.concat([l, b]) }
     const expected = createHash('sha512')
       .update(Buffer.from('antseed-rd-v1', 'utf8'))
-      .update(Buffer.from(NONCE))
+      .update(lp(Buffer.from(NONCE)))
       .update(Buffer.from([0x01]))
-      .update(len)
-      .update(Buffer.from(PEER, 'hex'))
+      .update(lp(Buffer.from(PEER, 'hex')))
       .digest()
     expect(Buffer.from(rd).equals(expected)).toBe(true)
   })

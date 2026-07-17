@@ -43,7 +43,7 @@ export {
 } from './caps/provider-claims.js'
 export type { ProviderClaimDefinition } from './caps/provider-claims.js'
 
-// Buyer measured-image policy loader (A5 interim; replaced by VerifyContext.policy in #713).
+// Buyer measured-image policy loader (reads the approved-measurement allow-list from env).
 export { readMeasuredImagePolicy } from './verifier.js'
 
 // Report_data binding schemes — the frozen registry the buyer verifies provider quotes against.

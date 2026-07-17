@@ -57,11 +57,10 @@ function msg(err: unknown): string {
 }
 
 /**
- * A5: buyer measured-image policy. VerifyContext carries no buyer config yet, so the
- * approved-measurement allow-list is read from ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY —
- * inline JSON, or "@/path/to/policy.json". Without it, measured-image reports ok:false
- * ("no approved measurement set configured") exactly as before. Parse failures disable the
- * policy (never throw the whole round). Replaced by VerifyContext.policy once #713 adds it.
+ * Buyer measured-image policy: the approved-measurement allow-list, read from
+ * ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY — inline JSON, or "@/path/to/policy.json". Without it,
+ * measured-image reports ok:false ("no approved measurement set configured"). A parse failure
+ * disables the policy rather than throwing the whole verification round.
  */
 export function readMeasuredImagePolicy(): MeasuredImagePolicy | undefined {
   const raw = process.env['ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY']?.trim()

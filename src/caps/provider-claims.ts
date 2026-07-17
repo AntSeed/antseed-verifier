@@ -40,20 +40,13 @@ export function claimsConfigKey(key: string): string {
 }
 
 /**
- * Domain tag for the canonical provider report_data scheme (v1). Reconciles the three
- * previously-divergent layouts (node = SHA-512(nonce‖peerId); this cap's old
- * SHA-512(nonce‖docBytes); the Python provider PoC's SHA-256(nonce‖ts‖pubkey)‖SHA-256(gpu))
- * into ONE 64-byte provider quote layout so a single provider quote can serve every
- * provider cap at once:
+ * Provider quote report_data layout for TEE-attested claims:
  *
  *   report_data[ 0:32] = SHA-256( DOMAIN ‖ nonce(32) ‖ SHA-256(claimsDocBytes) )
- *   report_data[32:64] = SHA-256( gpuEvidenceBytes )   // reserved; the gpu-cc cap owns
- *                                                       // this half (A7/A2 milestone)
+ *   report_data[32:64] = SHA-256( gpuEvidenceBytes )   // owned by the gpu-cc cap
  *
- * The node cap keeps its own SHA-512(nonce‖peerId) — it binds identity, not a payload, and
- * the SDK controls both ends of it. When per-response signing lands (A2), the TEE signing
- * pubkey folds into the [0:32] preimage. `claimsReportData` returns the 32-byte [0:32]
- * commitment; the verifier compares it against the provider quote's first half.
+ * `claimsReportData` returns the 32-byte [0:32] commitment; the verifier compares it against
+ * the provider quote's first half.
  */
 export const PROVIDER_REPORT_DATA_DOMAIN = 'antseed-provider-report-data-v1'
 
@@ -104,7 +97,7 @@ export const PROVIDER_CLAIMS_MENU: Record<string, ProviderClaimDefinition> = {
 const CLAIM_NAME_RE = /^[a-z0-9][a-z0-9.-]{0,63}$/
 /** Hard bound on claims per document, so a provider cannot flood the buyer's report. */
 const MAX_CLAIMS = 64
-/** Hard bound on the claims document size before JSON.parse (A8). */
+/** Hard bound on the claims document size before JSON.parse (a hostile seller must not force an unbounded parse). */
 const MAX_DOC_BYTES = 64 * 1024
 
 /** Parse + validate a claims document envelope. Throws with a doc-level reason. */
@@ -205,8 +198,8 @@ export const providerClaimsCapability: Capability = {
         results.push({ claim, ok: false, detail: bindingFailure })
         continue
       }
-      // A4: an asserted-level pass is a signed self-assertion, NOT an independent
-      // measurement — label it so buyer UIs/policy cannot render it as "verified".
+      // An asserted-level pass is a signed self-assertion, NOT an independent measurement —
+      // label it so buyer UIs/policy cannot render it as "verified".
       results.push({
         claim,
         ok: true,

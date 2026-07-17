@@ -21,25 +21,37 @@ function pluck(obj: unknown, path: string): unknown {
 }
 
 /**
- * Like collectViaHttp, but returns the field's raw STRING (no base64 decode). Used to pull a
- * report_data-binding ingredient (e.g. the provider's E2E public key) from the evidence route.
+ * Fetch the provider evidence route ONCE, returning the base64-decoded quote and, when a pubkey
+ * field is named, the report_data-binding pubkey string. Single fetch so the quote and the
+ * pubkey come from the same response — a two-fetch split could pair a quote with a different
+ * instance's key.
  */
-export async function collectStringViaHttp(
+export async function collectTdxAndPubkey(
   urlTemplate: string,
   nonce: Uint8Array,
-  field: string,
-): Promise<string> {
+  quoteField: string,
+  pubkeyField?: string,
+): Promise<{ quote: Uint8Array; pubkey?: string }> {
   const url = urlTemplate.replace(/\{nonce\}/g, Buffer.from(nonce).toString('hex'))
   const resp = await fetch(url)
   if (!resp.ok) {
     throw new Error(`http attestation endpoint returned HTTP ${resp.status}`)
   }
   const json: unknown = await resp.json()
-  const value = pluck(json, field)
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new Error(`http attestation response has no string at "${field}"`)
+  const q = pluck(json, quoteField)
+  if (typeof q !== 'string' || q.length === 0) {
+    throw new Error(`http attestation response has no base64 quote at "${quoteField}"`)
   }
-  return value
+  const quote = new Uint8Array(Buffer.from(q, 'base64'))
+  if (quote.length === 0) {
+    throw new Error(`http attestation quote at "${quoteField}" is not valid base64`)
+  }
+  if (!pubkeyField) return { quote }
+  const pk = pluck(json, pubkeyField)
+  if (typeof pk !== 'string' || pk.length === 0) {
+    throw new Error(`http attestation response has no string at "${pubkeyField}"`)
+  }
+  return { quote, pubkey: pk }
 }
 
 export async function collectViaHttp(

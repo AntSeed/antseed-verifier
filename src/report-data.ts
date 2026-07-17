@@ -6,10 +6,10 @@ import { createHash } from 'node:crypto'
  * hardware stack. The SDK verifies against a CLOSED, version-pinned registry:
  *
  *   - antseed-rd-v1           our canonical, COMPOSITIONAL scheme. nonce is always bound;
- *                             optional fields (peerId, e2ePubkey, claimsDocHash, gpuHash)
- *                             are included iff their ingredient is present, in canonical
- *                             tag order, each domain-tagged + length-prefixed. One rule
- *                             covers every combination — the node cap is the {peerId} case.
+ *                             optional fields (peerId, e2ePubkey) are included iff their
+ *                             ingredient is present, in canonical tag order, each tagged +
+ *                             length-prefixed. One rule covers every combination — the node
+ *                             cap is the {peerId} case. New fields take a new tag + version bump.
  *   - nonce-pubkey-sha256-v1  a FOREIGN construction (e.g. Chutes) we do NOT control:
  *                             report_data[0:32] = SHA-256(nonce_hex ‖ e2ePubkey_b64). We
  *                             replicate its exact bytes only to VERIFY a quote it minted.
@@ -25,10 +25,6 @@ export interface BindingIngredients {
   peerId?: string
   /** base64 TEE-generated public key — E2E / signing providers. */
   e2ePubkey?: string
-  /** SHA-256 of the claims document — reserved for provider-claims migration. */
-  claimsDocHash?: Uint8Array
-  /** SHA-256 of the GPU evidence transcript — reserved for gpu-cc migration. */
-  gpuHash?: Uint8Array
 }
 
 export interface ReportDataScheme {
@@ -43,6 +39,13 @@ export interface ReportDataScheme {
 
 const RD_DOMAIN = 'antseed-rd-v1'
 
+/** Prefix a value with its 4-byte big-endian length, so concatenated values stay unambiguous. */
+function lenPrefixed(b: Buffer): Buffer {
+  const len = Buffer.alloc(4)
+  len.writeUInt32BE(b.length, 0)
+  return Buffer.concat([len, b])
+}
+
 /**
  * Frozen field table for antseed-rd-v1. `tag` is the canonical ordering key AND a per-field
  * domain separator. Add a field → new tag + SDK version bump; never reorder or reuse a tag.
@@ -50,28 +53,24 @@ const RD_DOMAIN = 'antseed-rd-v1'
 const FIELDS: { tag: number; get: (i: BindingIngredients) => Buffer | null }[] = [
   { tag: 0x01, get: (i) => (i.peerId ? Buffer.from(i.peerId.toLowerCase(), 'hex') : null) },
   { tag: 0x02, get: (i) => (i.e2ePubkey ? Buffer.from(i.e2ePubkey, 'base64') : null) },
-  { tag: 0x03, get: (i) => (i.claimsDocHash ? Buffer.from(i.claimsDocHash) : null) },
-  { tag: 0x04, get: (i) => (i.gpuHash ? Buffer.from(i.gpuHash) : null) },
 ]
 
 export const antseedRdV1: ReportDataScheme = {
   id: RD_DOMAIN,
   compareLen: 64,
   build(nonce, ing) {
+    // Unambiguous TLV: fixed domain tag, then every value length-prefixed (incl. the nonce)
+    // in fixed ascending field order, so no two distinct inputs share a preimage.
     const h = createHash('sha512')
-    h.update(Buffer.from(RD_DOMAIN, 'utf8')) // domain + version — frozen, always
-    h.update(Buffer.from(nonce)) // ALWAYS
+    h.update(Buffer.from(RD_DOMAIN, 'utf8'))
+    h.update(lenPrefixed(Buffer.from(nonce)))
     for (const f of FIELDS) {
-      // ascending tag = canonical order
       const b = f.get(ing)
-      if (!b) continue // field present iff its ingredient is present
-      const len = Buffer.alloc(4)
-      len.writeUInt32BE(b.length, 0)
-      h.update(Buffer.from([f.tag])) // tag byte (separates fields)
-      h.update(len) // length-prefix (unambiguous boundaries)
-      h.update(b)
+      if (!b) continue
+      h.update(Buffer.from([f.tag]))
+      h.update(lenPrefixed(b))
     }
-    return new Uint8Array(h.digest()) // fills all 64 report_data bytes
+    return new Uint8Array(h.digest())
   },
   gpuNonce(nonce) {
     return nonce // our GPU evidence binds the raw round nonce
