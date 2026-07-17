@@ -124,11 +124,12 @@ describe('runVerify — happy path (one claim per capability)', () => {
 
 describe('runVerify — provider claims (one ClaimResult per sub-claim)', () => {
   const CLAIMS_PARENT = claimId(PROVIDER_CLAIMS_CAP_ID)
+  // Values only — the claim definitions (meaning, validator, required proof) are frozen in the SDK.
   const claimsDoc = new TextEncoder().encode(JSON.stringify({
     version: 1,
     claims: {
-      'gpu-count': { value: 8 },
-      'model-image': { value: 'sha256:abc', proof: 'tdx-quote' },
+      'model-id': 'llama-3.1-70b',
+      'serving-image-digest': `sha256:${'a'.repeat(64)}`,
     },
   }))
 
@@ -150,17 +151,18 @@ describe('runVerify — provider claims (one ClaimResult per sub-claim)', () => 
     })
     const r = await runVerify(ctx, boundVerify)
     expect(r.ok).toBe(true)
-    expect(findClaim(r, `${CLAIMS_PARENT}/gpu-count`)?.ok).toBe(true)
-    expect(findClaim(r, `${CLAIMS_PARENT}/gpu-count`)?.detail).toMatch(/asserted by provider/)
-    expect(findClaim(r, `${CLAIMS_PARENT}/model-image`)?.ok).toBe(true)
-    expect(findClaim(r, `${CLAIMS_PARENT}/model-image`)?.detail).toMatch(/attested by provider TEE/)
+    // The quote binds the whole document, so both claims report as TEE-attested.
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-id`)?.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-id`)?.detail).toMatch(/attested by provider TEE/)
+    expect(findClaim(r, `${CLAIMS_PARENT}/serving-image-digest`)?.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/serving-image-digest`)?.detail).toMatch(/attested by provider TEE/)
     // seller-bound covers the claims doc as part of the whole bundle.
     expect(findClaim(r, BOUND)?.ok).toBe(true)
   })
 
-  it('claims are informational: a failing tdx-quote sub-claim never gates the overall verdict', async () => {
+  it('claims are informational: a failing quote-required sub-claim never gates the overall verdict', async () => {
     const { ctx } = makeCtx(async (nonce) => {
-      // No provider quote this round — the tdx-quote claim has nothing to bind to.
+      // No provider quote this round — the tdx-quote-required claim has nothing to bind to.
       const bundle = {
         'seller-node-tee-genuine': encodeTeeTdxEvidence(randomBytes(64)),
         [PROVIDER_CLAIMS_CAP_ID]: claimsDoc,
@@ -169,9 +171,10 @@ describe('runVerify — provider claims (one ClaimResult per sub-claim)', () => 
     })
     const r = await runVerify(ctx, okVerify)
     expect(r.ok).toBe(true)
-    expect(findClaim(r, `${CLAIMS_PARENT}/gpu-count`)?.ok).toBe(true)
-    expect(findClaim(r, `${CLAIMS_PARENT}/model-image`)?.ok).toBe(false)
-    expect(findClaim(r, `${CLAIMS_PARENT}/model-image`)?.detail).toMatch(/no verified provider TDX quote/)
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-id`)?.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-id`)?.detail).toMatch(/asserted by provider/)
+    expect(findClaim(r, `${CLAIMS_PARENT}/serving-image-digest`)?.ok).toBe(false)
+    expect(findClaim(r, `${CLAIMS_PARENT}/serving-image-digest`)?.detail).toMatch(/no verified provider TDX quote/)
   })
 })
 

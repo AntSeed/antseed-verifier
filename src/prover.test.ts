@@ -16,7 +16,7 @@ const PROVIDER_TEE = 'seller-provider-tee-genuine'
 
 const CLAIMS_DOC = new TextEncoder().encode(JSON.stringify({
   version: 1,
-  claims: { 'gpu-count': { value: 8 } },
+  claims: { 'model-id': 'llama-3.1-70b' },
 }))
 
 const ENV_KEYS = [

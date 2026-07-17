@@ -6,23 +6,29 @@ import { collectViaHttp } from '../collect/http.js'
 import { ACCEPTABLE_TCB, type ParsedTdxQuote } from './tee-tdx.js'
 
 /**
- * Capability 'seller-provider-claims': carries the inference PROVIDER's own claims into
- * the protocol with per-claim granularity. The provider publishes a claims DOCUMENT (a
- * named map of claims); the buyer emits one ClaimResult per claim, namespaced
- * '<verifier>:seller-provider-claims/<name>', so downstream policy can act on individual
- * provider guarantees instead of one opaque blob.
+ * Capability 'seller-provider-claims': carries the inference PROVIDER's claims into the
+ * protocol with per-claim granularity — one ClaimResult per claim, namespaced
+ * '<verifier>:seller-provider-claims/<name>'.
  *
- * Each claim declares how it is proven:
- *   'asserted'  (default) the provider asserts it. Integrity, freshness and seller
- *               identity still come for free from the whole-bundle seller-bound signature
- *               (this cap's evidence is part of the bundle it signs).
- *   'tdx-quote' the provider's TDX quote (independently DCAP-verified this round as
- *               seller-provider-tee-genuine) must commit to THIS document + THIS nonce in
- *               its report_data — the claims are then attested by the provider's TEE, not
- *               merely asserted. See claimsReportData for the commitment scheme.
+ * The claims menu is FROZEN IN THE SDK (PROVIDER_CLAIMS_MENU below), never supplied by
+ * the seller or provider: each menu entry fixes the claim's meaning, its value validator
+ * and the proof level it requires, and this SDK ships version-pinned through the CLI's
+ * curated trust registry — so every buyer runs identical, frozen verification logic for
+ * every claim, and trusting a claim requires trusting only this SDK + the evidence origin.
+ * The provider's document supplies VALUES only ({ "<name>": <value> }); names outside
+ * the menu can never pass. Growing the menu is an SDK version bump, re-pinned network-wide.
+ *
+ * Frozen proof levels:
+ *   'asserted'  the claim may pass on bundle integrity alone: the document rides in the
+ *               evidence bundle that seller-bound signs (freshness + seller identity).
+ *   'tdx-quote' the claim passes ONLY when the provider's TDX quote (independently
+ *               DCAP-verified this round as seller-provider-tee-genuine) commits to this
+ *               exact document + nonce in its report_data (see claimsReportData) — the
+ *               claim is then attested by the provider's TEE, not merely asserted.
+ * When the quote binding holds, asserted-level claims are reported TEE-attested too.
  *
  * The document is provider-authored BYTES carried verbatim (base64 field on the same
- * config-driven evidence route as the provider quote): tdx-quote proof hashes the exact
+ * config-driven evidence route as the provider quote): the binding hashes the exact
  * bytes, so no re-encoding is allowed anywhere. No provider specifics live here.
  */
 
@@ -34,7 +40,7 @@ export function claimsConfigKey(key: string): string {
 }
 
 /**
- * report_data commitment for tdx-quote proof (64 bytes = the TDX REPORTDATA size):
+ * report_data commitment for the tdx-quote binding (64 bytes = the TDX REPORTDATA size):
  *
  *   report_data = SHA-512( nonce(32 raw bytes) || claimsDocumentBytes )
  *
@@ -49,19 +55,47 @@ export function claimsReportData(nonce: Uint8Array, docBytes: Uint8Array): Uint8
   return new Uint8Array(h.digest())
 }
 
+/** One frozen menu entry: what the claim means, how its value must look, what proves it. */
+export interface ProviderClaimDefinition {
+  /** Human meaning of the claim, frozen with its verification semantics. */
+  description: string
+  /** Minimum proof required to pass: 'asserted' (bundle-bound) or 'tdx-quote' (TEE-bound). */
+  proof: 'asserted' | 'tdx-quote'
+  /** Frozen value check; returns a failure reason, or null when the value is acceptable. */
+  validate(value: unknown): string | null
+}
+
+/**
+ * THE frozen claims menu for this SDK version. Buyers verify exclusively against these
+ * definitions; a document name outside this menu can never pass. Add entries only with
+ * an SDK version bump (the CLI trust registry pins the exact version network-wide).
+ */
+export const PROVIDER_CLAIMS_MENU: Record<string, ProviderClaimDefinition> = {
+  'model-id': {
+    description: 'the model identifier this provider serves for the routed requests',
+    proof: 'asserted',
+    validate: (v) =>
+      typeof v === 'string' && v.length > 0 && v.length <= 200
+        ? null
+        : 'expected a non-empty string (max 200 chars)',
+  },
+  'serving-image-digest': {
+    description: 'digest of the serving-stack image handling requests inside the provider TEE',
+    proof: 'tdx-quote',
+    validate: (v) =>
+      typeof v === 'string' && /^sha256:[0-9a-f]{64}$/.test(v)
+        ? null
+        : 'expected "sha256:<64 lowercase hex>"',
+  },
+}
+
 /** Claim names become protocol claim-id path segments; keep them id-safe and bounded. */
 const CLAIM_NAME_RE = /^[a-z0-9][a-z0-9.-]{0,63}$/
 /** Hard bound on claims per document, so a provider cannot flood the buyer's report. */
 const MAX_CLAIMS = 64
-const PROOF_KINDS = new Set(['asserted', 'tdx-quote'])
 
-interface ProviderClaim {
-  value: unknown
-  proof: string
-}
-
-/** Parse + validate a claims document. Throws with a doc-level reason on any violation. */
-function parseClaimsDoc(bytes: Uint8Array): Map<string, ProviderClaim> {
+/** Parse + validate a claims document envelope. Throws with a doc-level reason. */
+function parseClaimsDoc(bytes: Uint8Array): Map<string, unknown> {
   let root: unknown
   try {
     root = JSON.parse(new TextDecoder().decode(bytes))
@@ -83,21 +117,12 @@ function parseClaimsDoc(bytes: Uint8Array): Map<string, ProviderClaim> {
   if (entries.length > MAX_CLAIMS) {
     throw new Error(`claims document has too many claims (${entries.length} > ${MAX_CLAIMS})`)
   }
-  const out = new Map<string, ProviderClaim>()
-  for (const [name, entry] of entries) {
+  for (const [name] of entries) {
     if (!CLAIM_NAME_RE.test(name)) {
       throw new Error(`invalid claim name "${name}": use lowercase letters, digits, hyphen or dot (max 64 chars)`)
     }
-    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
-      throw new Error(`claim "${name}" is not an object`)
-    }
-    const { value, proof } = entry as { value?: unknown; proof?: unknown }
-    if (proof !== undefined && typeof proof !== 'string') {
-      throw new Error(`claim "${name}" has a non-string proof`)
-    }
-    out.set(name, { value, proof: proof ?? 'asserted' })
   }
-  return out
+  return new Map(entries)
 }
 
 /** Compact human summary of a claim's value for ClaimResult.detail. */
@@ -108,14 +133,14 @@ function summarize(value: unknown): string {
 
 /**
  * One binding verdict per document: is the provider quote genuine AND committed to these
- * exact document bytes? Shared by every tdx-quote claim in the doc.
+ * exact document bytes? Shared by every claim in the doc.
  */
 function quoteBinding(
   p: ParsedTdxQuote | undefined,
   nonce: Uint8Array,
   docBytes: Uint8Array,
 ): string | null {
-  if (!p) return 'no verified provider TDX quote in this round (tdx-quote proof requires seller-provider-tee-genuine evidence)'
+  if (!p) return 'no verified provider TDX quote in this round (this claim requires seller-provider-tee-genuine evidence)'
   if (p.error) return p.error
   if (!ACCEPTABLE_TCB.has(p.status)) return `provider TCB status not acceptable: ${p.status || 'unknown'}`
   if (!p.td) return 'provider quote is not an Intel TDX quote'
@@ -135,30 +160,40 @@ export const providerClaimsCapability: Capability = {
     if (!input.evidence) {
       return [{ claim: parent, ok: false, detail: 'seller returned no claims document' }]
     }
-    let claims: Map<string, ProviderClaim>
+    let values: Map<string, unknown>
     try {
-      claims = parseClaimsDoc(input.evidence)
+      values = parseClaimsDoc(input.evidence)
     } catch (err) {
       return [{ claim: parent, ok: false, detail: err instanceof Error ? err.message : String(err) }]
     }
-    // Bind once per document; every tdx-quote claim shares the verdict.
+    // Bind once per document; every claim shares the verdict.
     const p = input.parsedQuote as ParsedTdxQuote | undefined
     const bindingFailure = quoteBinding(p, input.nonce, input.evidence)
 
     const results: ClaimResult[] = []
-    for (const [name, c] of claims) {
+    for (const [name, value] of values) {
       const claim = `${parent}/${name}`
-      if (!PROOF_KINDS.has(c.proof)) {
-        results.push({ claim, ok: false, detail: `unknown proof kind "${c.proof}"` })
-      } else if (c.proof === 'tdx-quote') {
-        results.push(
-          bindingFailure
-            ? { claim, ok: false, detail: bindingFailure }
-            : { claim, ok: true, detail: `attested by provider TEE (report_data-bound TDX quote): ${summarize(c.value)}` },
-        )
-      } else {
-        results.push({ claim, ok: true, detail: `asserted by provider (integrity/freshness via seller-bound): ${summarize(c.value)}` })
+      const def = PROVIDER_CLAIMS_MENU[name]
+      if (!def) {
+        results.push({ claim, ok: false, detail: `unknown claim "${name}": not in this SDK version's frozen claims menu` })
+        continue
       }
+      const invalid = def.validate(value)
+      if (invalid) {
+        results.push({ claim, ok: false, detail: `invalid value: ${invalid}` })
+        continue
+      }
+      if (def.proof === 'tdx-quote' && bindingFailure) {
+        results.push({ claim, ok: false, detail: bindingFailure })
+        continue
+      }
+      results.push({
+        claim,
+        ok: true,
+        detail: bindingFailure
+          ? `asserted by provider (integrity/freshness via seller-bound): ${summarize(value)}`
+          : `attested by provider TEE (report_data-bound TDX quote): ${summarize(value)}`,
+      })
     }
     return results
   },
@@ -170,7 +205,7 @@ export const providerClaimsCapability: Capability = {
       throw new Error(`${PROVIDER_CLAIMS_CAP_ID} requires an evidence url and a claims field; not offered`)
     }
     // collectViaHttp base64-decodes the field — the document bytes arrive VERBATIM,
-    // which tdx-quote proof depends on (report_data hashes the exact bytes).
+    // which the tdx-quote binding depends on (report_data hashes the exact bytes).
     return collectViaHttp(url, input.nonce, field)
   },
 }

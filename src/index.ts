@@ -31,9 +31,16 @@ export {
   providerClaimsCapability,
 } from './caps/index.js'
 
-// Provider-claims: per-claim granularity + the report_data commitment provider tooling
-// computes when binding a claims document into its TDX quote (proof: 'tdx-quote').
-export { PROVIDER_CLAIMS_CAP_ID, claimsConfigKey, claimsReportData } from './caps/provider-claims.js'
+// Provider-claims: the SDK-frozen claims menu (the per-version claim definitions buyers
+// verify against) + the report_data commitment provider tooling computes when binding a
+// claims document into its TDX quote.
+export {
+  PROVIDER_CLAIMS_CAP_ID,
+  PROVIDER_CLAIMS_MENU,
+  claimsConfigKey,
+  claimsReportData,
+} from './caps/provider-claims.js'
+export type { ProviderClaimDefinition } from './caps/provider-claims.js'
 
 // Buyer-side orchestration + the injectable DCAP seam (useful for tooling/tests).
 export { runVerify } from './verifier.js'
