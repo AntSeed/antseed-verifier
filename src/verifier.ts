@@ -10,6 +10,7 @@ import {
   type ParsedTdxQuote,
   type VerifyQuoteFn,
 } from './caps/tee-tdx.js'
+import { PROVIDER_CLAIMS_CAP_ID } from './caps/provider-claims.js'
 import {
   NONCE_BYTES,
   VERIFIER_ID,
@@ -41,11 +42,12 @@ const REQUIRED_CAPS = [NODE_TEE_CAP_ID, SELLER_BOUND_ID]
 const TDX_CAP_IDS = [NODE_TEE_CAP_ID, PROVIDER_TEE_CAP_ID]
 /** Derived cap (no own evidence): always worth reporting; verifies the provider quote. */
 const DERIVED_CAPS = [MEASURED_IMAGE_ID]
-/** Which TDX parse each cap's verify consumes (TDX caps read their own; measured-image the provider). */
+/** Which TDX parse each cap's verify consumes (TDX caps read their own; provider-derived caps the provider's). */
 const PARSE_SOURCE: Record<string, string> = {
   [NODE_TEE_CAP_ID]: NODE_TEE_CAP_ID,
   [PROVIDER_TEE_CAP_ID]: PROVIDER_TEE_CAP_ID,
   [MEASURED_IMAGE_ID]: PROVIDER_TEE_CAP_ID,
+  [PROVIDER_CLAIMS_CAP_ID]: PROVIDER_TEE_CAP_ID,
 }
 
 function msg(err: unknown): string {
@@ -114,7 +116,8 @@ export async function runVerify(
     const source = PARSE_SOURCE[capId]
     const parsed = source ? parsedByCap.get(source) : undefined
     try {
-      claims.push(await cap.verify({ nonce, peerId, evidence: evidence[capId], parsedQuote: parsed, evidenceBundle: evidence }))
+      const out = await cap.verify({ nonce, peerId, evidence: evidence[capId], parsedQuote: parsed, evidenceBundle: evidence })
+      claims.push(...(Array.isArray(out) ? out : [out]))
     } catch (err) {
       claims.push({ claim: claimId(capId), ok: false, detail: `verify threw: ${msg(err)}` })
     }

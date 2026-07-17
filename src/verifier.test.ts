@@ -13,6 +13,7 @@ import {
 } from './shared.js'
 import { encodeTeeTdxEvidence, type TdMeasurements, type VerifyQuoteFn } from './caps/tee-tdx.js'
 import { evmAddressFromPrivateKey, signerFromPrivateKey } from './caps/seller-bound.js'
+import { PROVIDER_CLAIMS_CAP_ID, claimsReportData } from './caps/provider-claims.js'
 
 // A real seller keypair — seller-bound signatures must recover to this peer id.
 const PRIV = '03'.repeat(32)
@@ -100,6 +101,7 @@ describe('runVerify — request shape', () => {
         'seller-bound',
         'seller-provider-measured-image',
         'seller-provider-gpu-cc',
+        'seller-provider-claims',
       ]),
     )
   })
@@ -117,6 +119,59 @@ describe('runVerify — happy path (one claim per capability)', () => {
     // measured-image derives from the provider quote but never passes without a policy.
     expect(findClaim(r, MEASURED)?.ok).toBe(false)
     expect(findClaim(r, MEASURED)?.detail).toMatch(/no approved measurement set configured/)
+  })
+})
+
+describe('runVerify — provider claims (one ClaimResult per sub-claim)', () => {
+  const CLAIMS_PARENT = claimId(PROVIDER_CLAIMS_CAP_ID)
+  const claimsDoc = new TextEncoder().encode(JSON.stringify({
+    version: 1,
+    claims: {
+      'gpu-count': { value: 8 },
+      'model-image': { value: 'sha256:abc', proof: 'tdx-quote' },
+    },
+  }))
+
+  it('reports each provider claim individually; tdx-quote claims verify against the provider quote', async () => {
+    let seenNonce: Uint8Array | undefined
+    const { ctx } = makeCtx(async (nonce) => {
+      seenNonce = nonce
+      const bundle = {
+        'seller-node-tee-genuine': encodeTeeTdxEvidence(randomBytes(64)),
+        'seller-provider-tee-genuine': encodeTeeTdxEvidence(randomBytes(64)),
+        [PROVIDER_CLAIMS_CAP_ID]: claimsDoc,
+      }
+      return ok200(encodeAttestResponse({ ...bundle, 'seller-bound': await signBundle(nonce, bundle) }))
+    })
+    // The provider quote commits to the claims doc: report_data = SHA-512(nonce ‖ docBytes).
+    const boundVerify: VerifyQuoteFn = async () => ({
+      status: 'UpToDate',
+      td: td({ reportData: claimsReportData(seenNonce!, claimsDoc) }),
+    })
+    const r = await runVerify(ctx, boundVerify)
+    expect(r.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/gpu-count`)?.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/gpu-count`)?.detail).toMatch(/asserted by provider/)
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-image`)?.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-image`)?.detail).toMatch(/attested by provider TEE/)
+    // seller-bound covers the claims doc as part of the whole bundle.
+    expect(findClaim(r, BOUND)?.ok).toBe(true)
+  })
+
+  it('claims are informational: a failing tdx-quote sub-claim never gates the overall verdict', async () => {
+    const { ctx } = makeCtx(async (nonce) => {
+      // No provider quote this round — the tdx-quote claim has nothing to bind to.
+      const bundle = {
+        'seller-node-tee-genuine': encodeTeeTdxEvidence(randomBytes(64)),
+        [PROVIDER_CLAIMS_CAP_ID]: claimsDoc,
+      }
+      return ok200(encodeAttestResponse({ ...bundle, 'seller-bound': await signBundle(nonce, bundle) }))
+    })
+    const r = await runVerify(ctx, okVerify)
+    expect(r.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/gpu-count`)?.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-image`)?.ok).toBe(false)
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-image`)?.detail).toMatch(/no verified provider TDX quote/)
   })
 })
 

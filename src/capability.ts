@@ -43,7 +43,8 @@ export interface CapabilityCollectInput {
 
 export interface Capability {
   id: string
-  verify(input: CapabilityVerifyInput): ClaimResult | Promise<ClaimResult>
+  /** Most caps yield one ClaimResult; a granular cap (provider-claims) yields one per sub-claim. */
+  verify(input: CapabilityVerifyInput): ClaimResult | ClaimResult[] | Promise<ClaimResult | ClaimResult[]>
   /** Present only for caps a seller can produce evidence for. Throwing means "not offered". */
   collect?(input: CapabilityCollectInput): Promise<Uint8Array>
 }

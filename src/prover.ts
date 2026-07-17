@@ -4,6 +4,7 @@ import { listCapabilities } from './capability.js'
 import { evmAddressFromPrivateKey, signerFromPrivateKey } from './caps/seller-bound.js'
 import { NODE_TEE_CAP_ID, PROVIDER_TEE_CAP_ID, tdxConfigKey } from './caps/tee-tdx.js'
 import { gpuConfigKey } from './caps/gpu-nvidia.js'
+import { claimsConfigKey } from './caps/provider-claims.js'
 import {
   VERIFIER_ID,
   decodeAttestRequest,
@@ -27,6 +28,9 @@ import {
  *   ANTSEED_VERIFIER_PROVIDER_GPU_FIELD    JSON field holding the provider's GPU CC evidence
  *                                          (e.g. "gpu_evidence"); when set (with the evidence URL),
  *                                          seller-provider-gpu-cc is offered off the SAME route
+ *   ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD JSON field holding the provider's base64 claims document;
+ *                                          when set (with the evidence URL), seller-provider-claims
+ *                                          is offered off the SAME route
  *   ANTSEED_VERIFIER_SIGNING_KEY           seller identity private key (hex) for seller-bound
  */
 
@@ -36,6 +40,7 @@ const NODE_TEE_SOURCE = 'ANTSEED_VERIFIER_NODE_TEE'
 const PROVIDER_EVIDENCE_URL = 'ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL'
 const PROVIDER_TEE_FIELD = 'ANTSEED_VERIFIER_PROVIDER_TEE_FIELD'
 const PROVIDER_GPU_FIELD = 'ANTSEED_VERIFIER_PROVIDER_GPU_FIELD'
+const PROVIDER_CLAIMS_FIELD = 'ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD'
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -69,6 +74,12 @@ function baseConfig(): Record<string, string> {
     if (gpuField) {
       cfg[gpuConfigKey('url')] = provUrl
       cfg[gpuConfigKey('field')] = gpuField
+    }
+    // seller-provider-claims: same evidence route, only offered when a claims field is named.
+    const claimsField = process.env[PROVIDER_CLAIMS_FIELD]?.trim()
+    if (claimsField) {
+      cfg[claimsConfigKey('url')] = provUrl
+      cfg[claimsConfigKey('field')] = claimsField
     }
   }
   return cfg

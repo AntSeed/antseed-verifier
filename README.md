@@ -41,6 +41,22 @@ capabilities its infrastructure supports; the buyer verifies each:
   this round. The buyer-side check is an injectable `GpuVerifyFn` (default NRAS), so an
   offline verifier drops in with no cap change — reserve `ANTSEED_VERIFIER_GPU_MODE=local`
   (not yet built). Informational, never required (a CPU-only seller still verifies).
+- **`seller-provider-claims`** — carries the provider's OWN claims into the protocol
+  with per-claim granularity. The provider publishes a claims document; the buyer emits
+  one claim per entry (`refoundhq-antseed-verifier:seller-provider-claims/<name>`), so
+  policy can act on individual provider guarantees. Each claim declares its proof:
+  `asserted` (integrity/freshness/seller identity via the whole-bundle `seller-bound`
+  signature) or `tdx-quote` (the provider's DCAP-verified TDX quote must commit to the
+  exact document bytes + round nonce in its `report_data` — provider-TEE-attested, not
+  merely asserted). Document format (provider-authored bytes, carried verbatim):
+
+  ```json
+  { "version": 1, "claims": { "<name>": { "value": <any JSON>, "proof": "asserted" | "tdx-quote" } } }
+  ```
+
+  Names are id-safe (`[a-z0-9][a-z0-9.-]*`, ≤64 chars, ≤64 claims). For `tdx-quote`,
+  the provider mints its quote with `report_data = SHA-512(nonce ‖ documentBytes)`
+  (helper: `claimsReportData`). Informational, never required.
 
 The buyer requires `seller-node-tee-genuine` and `seller-bound`; the rest are
 reported informationally. Provider differences are handled only by generic,
@@ -65,7 +81,9 @@ import verifier, { prover } from '@refoundhq/antseed-verifier'
 Also exported for tooling and tests: the capability registry (`registerCapability`,
 `getCapability`, `listCapabilities`, `capabilityIds`) and the built-in capabilities
 (`nodeTeeCapability`, `providerTeeCapability`, `sellerBoundCapability`,
-`measuredImageCapability`, `gpuNvidiaCapability`); the TDX cap factory (`makeTdxCap`,
+`measuredImageCapability`, `gpuNvidiaCapability`, `providerClaimsCapability`);
+the provider-claims surface (`PROVIDER_CLAIMS_CAP_ID`, `claimsConfigKey`,
+`claimsReportData`); the TDX cap factory (`makeTdxCap`,
 `NODE_TEE_CAP_ID`, `PROVIDER_TEE_CAP_ID`); `runVerify`, `defaultVerifyQuote`,
 `verifyTdxEvidence`; `VERIFIER_ID`, `ATTEST_PATH`, `claimId`, `computeReportData`,
 `bundleDigest`, `sellerBoundPreimage`.
@@ -86,6 +104,9 @@ values:
   `seller-provider-tee-genuine` is offered via `http`.
 - `ANTSEED_VERIFIER_PROVIDER_TEE_FIELD` — the JSON field of that route's response
   holding the base64 provider quote (defaults to `quote`).
+- `ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD` — the JSON field of that route's response
+  holding the base64 provider claims document; when set (with the evidence URL),
+  `seller-provider-claims` is offered off the same route.
 - `ANTSEED_VERIFIER_SIGNING_KEY` — the seller identity key (hex) that produces
   `seller-bound` signatures; the cap is disabled if its address != the peer id.
 
