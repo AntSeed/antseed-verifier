@@ -7,12 +7,14 @@ import {
   VERIFIER_ID,
   bundleDigest,
   claimId,
+  computeReportData,
   decodeAttestRequest,
   encodeAttestResponse,
   sellerBoundPreimage,
 } from './shared.js'
 import { encodeTeeTdxEvidence, type TdMeasurements, type VerifyQuoteFn } from './caps/tee-tdx.js'
 import { evmAddressFromPrivateKey, signerFromPrivateKey } from './caps/seller-bound.js'
+import { PROVIDER_CLAIMS_CAP_ID, claimsReportData } from './caps/provider-claims.js'
 
 // A real seller keypair — seller-bound signatures must recover to this peer id.
 const PRIV = '03'.repeat(32)
@@ -37,8 +39,25 @@ function td(over: Partial<TdMeasurements> = {}): TdMeasurements {
   }
 }
 
-/** Stub DCAP: genuine TDX, current TCB (applied to every quote in the round). */
-const okVerify: VerifyQuoteFn = async () => ({ status: 'UpToDate', td: td() })
+/**
+ * Stub DCAP: genuine TDX, current TCB, reflecting the quote bytes back as report_data so a
+ * test can mint a quote whose report_data satisfies the node binding or the provider
+ * claims binding just by choosing the quote bytes. (Real DCAP reads report_data from the
+ * signed quote; here the "quote" IS the 64-byte report_data.)
+ */
+const okVerify: VerifyQuoteFn = async (quote) => ({
+  status: 'UpToDate',
+  td: td({ reportData: quote.length === 64 ? new Uint8Array(quote) : new Uint8Array(64) }),
+})
+
+/** A node quote bound to (nonce, PEER) — satisfies the node binding check under okVerify. */
+const boundNodeQuote = (nonce: Uint8Array): Uint8Array => new Uint8Array(computeReportData(nonce, PEER))
+/** A 64-byte provider report_data carrying a 32-byte commitment in [0:32]. */
+const rd64 = (commitment: Uint8Array): Uint8Array => {
+  const out = new Uint8Array(64)
+  out.set(commitment.subarray(0, 32), 0)
+  return out
+}
 
 const ok200 = (body: Uint8Array): SellerResponse => ({ statusCode: 200, headers: {}, body })
 
@@ -47,16 +66,16 @@ async function signBundle(nonce: Uint8Array, bundle: Record<string, Uint8Array>,
   return signer(sellerBoundPreimage(nonce, bundleDigest(bundle), PEER))
 }
 
-/** Minimal required bundle: the node quote + a seller-bound signature over it. */
+/** Minimal required bundle: the node quote (bound to nonce+peer) + a seller-bound signature over it. */
 async function nodeEvidence(nonce: Uint8Array, signer = sign): Promise<Uint8Array> {
-  const bundle = { 'seller-node-tee-genuine': encodeTeeTdxEvidence(randomBytes(64)) }
+  const bundle = { 'seller-node-tee-genuine': encodeTeeTdxEvidence(boundNodeQuote(nonce)) }
   return encodeAttestResponse({ ...bundle, 'seller-bound': await signBundle(nonce, bundle, signer) })
 }
 
-/** Full bundle: node quote + provider quote + one seller-bound signature covering both. */
+/** Full bundle: bound node quote + provider quote + one seller-bound signature covering both. */
 async function fullBundleEvidence(nonce: Uint8Array, signer = sign): Promise<Uint8Array> {
   const bundle = {
-    'seller-node-tee-genuine': encodeTeeTdxEvidence(randomBytes(64)),
+    'seller-node-tee-genuine': encodeTeeTdxEvidence(boundNodeQuote(nonce)),
     'seller-provider-tee-genuine': encodeTeeTdxEvidence(randomBytes(64)),
   }
   return encodeAttestResponse({ ...bundle, 'seller-bound': await signBundle(nonce, bundle, signer) })
@@ -100,6 +119,7 @@ describe('runVerify — request shape', () => {
         'seller-bound',
         'seller-provider-measured-image',
         'seller-provider-gpu-cc',
+        'seller-provider-claims',
       ]),
     )
   })
@@ -115,6 +135,84 @@ describe('runVerify — happy path (one claim per capability)', () => {
     // provider tee is present + genuine, but informational (not in the required set).
     expect(findClaim(r, PROVIDER)?.ok).toBe(true)
     // measured-image derives from the provider quote but never passes without a policy.
+    expect(findClaim(r, MEASURED)?.ok).toBe(false)
+    expect(findClaim(r, MEASURED)?.detail).toMatch(/no approved measurement set configured/)
+  })
+})
+
+describe('runVerify — provider claims (one ClaimResult per sub-claim)', () => {
+  const CLAIMS_PARENT = claimId(PROVIDER_CLAIMS_CAP_ID)
+  // Values only — the claim definitions (meaning, validator, required proof) are frozen in the SDK.
+  const claimsDoc = new TextEncoder().encode(JSON.stringify({
+    version: 1,
+    claims: {
+      'model-id': 'llama-3.1-70b',
+      'serving-image-digest': `sha256:${'a'.repeat(64)}`,
+    },
+  }))
+
+  it('reports each provider claim individually; tdx-quote claims verify against the provider quote', async () => {
+    const { ctx } = makeCtx(async (nonce) => {
+      // Provider quote commits to the claims doc in report_data[0:32] = claimsReportData(nonce, docBytes).
+      const bundle = {
+        'seller-node-tee-genuine': encodeTeeTdxEvidence(boundNodeQuote(nonce)),
+        'seller-provider-tee-genuine': encodeTeeTdxEvidence(rd64(claimsReportData(nonce, claimsDoc))),
+        [PROVIDER_CLAIMS_CAP_ID]: claimsDoc,
+      }
+      return ok200(encodeAttestResponse({ ...bundle, 'seller-bound': await signBundle(nonce, bundle) }))
+    })
+    const r = await runVerify(ctx, okVerify)
+    expect(r.ok).toBe(true)
+    // The quote binds the whole document, so both claims report as TEE-attested.
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-id`)?.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-id`)?.detail).toMatch(/attested by provider TEE/)
+    expect(findClaim(r, `${CLAIMS_PARENT}/serving-image-digest`)?.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/serving-image-digest`)?.detail).toMatch(/attested by provider TEE/)
+    // seller-bound covers the claims doc as part of the whole bundle.
+    expect(findClaim(r, BOUND)?.ok).toBe(true)
+  })
+
+  it('claims are informational: a failing quote-required sub-claim never gates the overall verdict', async () => {
+    const { ctx } = makeCtx(async (nonce) => {
+      // No provider quote this round — the tdx-quote-required claim has nothing to bind to.
+      const bundle = {
+        'seller-node-tee-genuine': encodeTeeTdxEvidence(boundNodeQuote(nonce)),
+        [PROVIDER_CLAIMS_CAP_ID]: claimsDoc,
+      }
+      return ok200(encodeAttestResponse({ ...bundle, 'seller-bound': await signBundle(nonce, bundle) }))
+    })
+    const r = await runVerify(ctx, okVerify)
+    expect(r.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-id`)?.ok).toBe(true)
+    expect(findClaim(r, `${CLAIMS_PARENT}/model-id`)?.detail).toMatch(/provider-asserted only, NOT independently verified/)
+    expect(findClaim(r, `${CLAIMS_PARENT}/serving-image-digest`)?.ok).toBe(false)
+    expect(findClaim(r, `${CLAIMS_PARENT}/serving-image-digest`)?.detail).toMatch(/no verified provider TDX quote/)
+  })
+})
+
+describe('runVerify — measured-image policy from env', () => {
+  const MRTD = '07'.repeat(48) // matches the stub provider quote's td.mrTd below
+
+  it('passes measured-image when an approved measurement is supplied via env', async () => {
+    const { ctx } = makeCtx(async (nonce) => ok200(await fullBundleEvidence(nonce)))
+    // Provider quote MRTD = 0x07*48 so the allow-list matches; other caps use okVerify's defaults.
+    const mrtdVerify: VerifyQuoteFn = async (quote) => ({
+      status: 'UpToDate',
+      td: td({ mrTd: new Uint8Array(48).fill(7), reportData: quote.length === 64 ? new Uint8Array(quote) : new Uint8Array(64) }),
+    })
+    process.env['ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY'] = JSON.stringify({ approvedMeasurements: [{ mrtd: MRTD }] })
+    try {
+      const r = await runVerify(ctx, mrtdVerify)
+      expect(findClaim(r, MEASURED)?.ok).toBe(true)
+      expect(findClaim(r, MEASURED)?.detail).toMatch(/measurements match an approved image/)
+    } finally {
+      delete process.env['ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY']
+    }
+  })
+
+  it('still reports measured-image ok:false with no policy configured', async () => {
+    const { ctx } = makeCtx(async (nonce) => ok200(await fullBundleEvidence(nonce)))
+    const r = await runVerify(ctx, okVerify)
     expect(findClaim(r, MEASURED)?.ok).toBe(false)
     expect(findClaim(r, MEASURED)?.detail).toMatch(/no approved measurement set configured/)
   })

@@ -41,6 +41,40 @@ capabilities its infrastructure supports; the buyer verifies each:
   this round. The buyer-side check is an injectable `GpuVerifyFn` (default NRAS), so an
   offline verifier drops in with no cap change — reserve `ANTSEED_VERIFIER_GPU_MODE=local`
   (not yet built). Informational, never required (a CPU-only seller still verifies).
+- **`seller-provider-claims`** — carries the provider's claims into the protocol with
+  per-claim granularity: one claim per entry
+  (`refoundhq-antseed-verifier:seller-provider-claims/<name>`), so buyer policy can act
+  on individual provider guarantees. The claims menu is **frozen in the SDK**
+  (`PROVIDER_CLAIMS_MENU`), never supplied by the seller or provider: each menu entry
+  fixes the claim's meaning, its value validator, and the proof level it requires, and
+  the SDK ships version-pinned through the CLI's curated trust registry — every buyer
+  runs identical frozen verification logic, so trusting a claim requires trusting only
+  this SDK + the evidence origin. Names outside the menu can never pass; growing the
+  menu is an SDK version bump. The provider's document supplies VALUES only
+  (provider-authored bytes, carried verbatim):
+
+  ```json
+  { "version": 1, "claims": { "<name>": <value> } }
+  ```
+
+  Frozen proof levels: `asserted` (may pass on whole-bundle `seller-bound` integrity
+  alone — reported as "provider-asserted only, NOT independently verified") and
+  `tdx-quote` (passes ONLY when the provider's DCAP-verified TDX quote commits to the
+  exact document in its `report_data`; a bound document upgrades asserted-level claims
+  to TEE-attested too). v0.1 menu: `model-id` (asserted) and `serving-image-digest`
+  (tdx-quote). Informational, never required.
+
+  The provider quote uses ONE canonical 64-byte `report_data` layout (domain-separated,
+  so a single provider quote serves every provider cap at once):
+
+  ```
+  report_data[ 0:32] = SHA-256( "antseed-provider-report-data-v1" ‖ nonce ‖ SHA-256(claimsDocBytes) )
+  report_data[32:64] = SHA-256( gpuEvidenceBytes )   // reserved for the gpu-cc cap
+  ```
+
+  `claimsReportData(nonce, docBytes)` returns the 32-byte `[0:32]` commitment; the buyer
+  compares it against the provider quote's first half. (The node cap keeps its own
+  `SHA-512(nonce ‖ peerId)` — it binds identity, not a payload.)
 
 The buyer requires `seller-node-tee-genuine` and `seller-bound`; the rest are
 reported informationally. Provider differences are handled only by generic,
@@ -65,7 +99,9 @@ import verifier, { prover } from '@refoundhq/antseed-verifier'
 Also exported for tooling and tests: the capability registry (`registerCapability`,
 `getCapability`, `listCapabilities`, `capabilityIds`) and the built-in capabilities
 (`nodeTeeCapability`, `providerTeeCapability`, `sellerBoundCapability`,
-`measuredImageCapability`, `gpuNvidiaCapability`); the TDX cap factory (`makeTdxCap`,
+`measuredImageCapability`, `gpuNvidiaCapability`, `providerClaimsCapability`);
+the provider-claims surface (`PROVIDER_CLAIMS_CAP_ID`, `claimsConfigKey`,
+`claimsReportData`); the TDX cap factory (`makeTdxCap`,
 `NODE_TEE_CAP_ID`, `PROVIDER_TEE_CAP_ID`); `runVerify`, `defaultVerifyQuote`,
 `verifyTdxEvidence`; `VERIFIER_ID`, `ATTEST_PATH`, `claimId`, `computeReportData`,
 `bundleDigest`, `sellerBoundPreimage`.
@@ -86,10 +122,46 @@ values:
   `seller-provider-tee-genuine` is offered via `http`.
 - `ANTSEED_VERIFIER_PROVIDER_TEE_FIELD` — the JSON field of that route's response
   holding the base64 provider quote (defaults to `quote`).
+- `ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD` — the JSON field of that route's response
+  holding the base64 provider claims document; when set (with the evidence URL),
+  `seller-provider-claims` is offered off the same route.
+- `ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME` — the frozen `report_data` scheme the
+  provider's quote uses (`antseed-rd-v1`, or `nonce-pubkey-sha256-v1` for a Chutes-style
+  E2E provider). When set, the buyer verifies the provider quote is bound to this round.
+- `ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD` — the JSON field holding the provider's
+  base64 E2E public key, the ingredient the scheme binds.
 - `ANTSEED_VERIFIER_SIGNING_KEY` — the seller identity key (hex) that produces
   `seller-bound` signatures; the cap is disabled if its address != the peer id.
 
-The verifier half has no special hardware requirement.
+The verifier (buyer) half has no special hardware requirement, and reads two optional
+policy knobs from the environment:
+
+- `ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY` — the `seller-provider-measured-image`
+  allow-list, as inline JSON (`{"approvedMeasurements":[{"mrtd":"…"}]}`) or `@/path.json`.
+  Without it the cap reports `ok:false` ("no approved measurement set configured"). Interim
+  until `@antseed/node`'s `VerifyContext` carries buyer policy.
+- `ANTSEED_VERIFIER_STRICT_TCB` — set to `true` to require TCB status exactly `UpToDate`
+  (rejecting `SWHardeningNeeded`). Default accepts both.
+
+### report_data binding schemes
+
+A TDX quote has one 64-byte `report_data`; how a provider commits this round's freshness
+(and any TEE-bound key) into it varies by stack. The SDK verifies against a **frozen,
+version-pinned registry** of schemes (`src/report-data.ts`) — a provider *selects* one by id,
+never defines one:
+
+- **`antseed-rd-v1`** — our canonical, *compositional* scheme: the nonce is always bound, and
+  optional fields (`peerId`, `e2ePubkey`, …) are included iff present, each domain-tagged and
+  length-prefixed. One rule covers every combination, and the seller **node** cap is simply its
+  `{peerId}` instance — so a genuine-but-borrowed or replayed quote cannot satisfy the required
+  `seller-node-tee-genuine` cap.
+- **`nonce-pubkey-sha256-v1`** — the foreign Chutes construction
+  (`SHA-256(nonce_hex ‖ e2ePubkey_b64)`), replicated only so the buyer can verify a quote
+  Chutes minted. Opt-in per provider via `ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME`.
+
+The same builder runs on the prover (to mint) and the buyer (to recompute), and because the
+nonce is always bound, a mis-declared or downgraded field set can only fail — never falsely
+pass. See `docs/e2e-report-data-schemes.md` for the end-to-end test flows (standard + Chutes).
 
 ## Build and test
 

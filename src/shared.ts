@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { keccak_256 } from '@noble/hashes/sha3.js'
+import { antseedRdV1 } from './report-data.js'
 
 /**
  * Shared constants + wire codecs used by BOTH halves of the SDK (buyer verifier
@@ -45,21 +46,12 @@ export function normalizePeerId(peerId: string): string {
 }
 
 /**
- * report_data binding scheme (64 bytes = the TDX REPORTDATA field size):
- *
- *   report_data = SHA-512( nonce(32 raw bytes) || utf8(peerId) )
- *
- * Used by the self-hosted (configfs) collector to bind the quote it mints to both
- * freshness and identity at generation time. Providers that hand back a pre-made
- * quote (http collector) bind their own report_data (often a provider key); in that
- * case the freshness+identity binding is carried by the seller-bound capability
- * instead, which is why this stays a helper rather than a hard requirement.
+ * The seller NODE's report_data binding: the {peerId} instance of the compositional scheme
+ * `antseed-rd-v1` (see report-data.ts). The configfs collector mints exactly this, so the
+ * buyer's node cap recomputes and enforces the same bytes.
  */
 export function computeReportData(nonce: Uint8Array, peerId: string): Buffer {
-  const h = createHash('sha512')
-  h.update(Buffer.from(nonce))
-  h.update(Buffer.from(normalizePeerId(peerId), 'utf8'))
-  return h.digest() // 64 bytes
+  return Buffer.from(antseedRdV1.build(nonce, { peerId: normalizePeerId(peerId) }))
 }
 
 /** The dependent capability whose own evidence is EXCLUDED from the bundle it signs over. */
@@ -142,7 +134,21 @@ export function encodeAttestRequest(nonce: Uint8Array, caps: string[]): Uint8Arr
   return new TextEncoder().encode(JSON.stringify(body))
 }
 
+/**
+ * Upper bound on an attestation request/response body before JSON.parse. Both halves
+ * parse counterparty-controlled bytes (the prover reads buyer requests; the buyer reads
+ * seller responses), so a hostile peer must not be able to force an unbounded parse.
+ */
+export const MAX_ATTEST_BODY_BYTES = 512 * 1024
+
+function assertBodySize(body: Uint8Array, what: string): void {
+  if (body.length > MAX_ATTEST_BODY_BYTES) {
+    throw new Error(`${what} exceeds ${MAX_ATTEST_BODY_BYTES} bytes (${body.length})`)
+  }
+}
+
 export function decodeAttestRequest(body: Uint8Array): { nonce: Uint8Array; caps: string[] } {
+  assertBodySize(body, 'attestation request')
   const parsed = JSON.parse(new TextDecoder().decode(body)) as Partial<AttestRequestBody>
   if (typeof parsed.nonce !== 'string' || parsed.nonce.length === 0) {
     throw new Error('attestation request missing "nonce"')
@@ -167,6 +173,7 @@ export function encodeAttestResponse(evidence: Record<string, Uint8Array>): Uint
 }
 
 export function decodeAttestResponse(body: Uint8Array): Record<string, Uint8Array> {
+  assertBodySize(body, 'attestation response')
   const parsed = JSON.parse(new TextDecoder().decode(body)) as Partial<AttestResponseBody>
   if (parsed.evidence === null || typeof parsed.evidence !== 'object') {
     throw new Error('attestation response missing "evidence" object')
