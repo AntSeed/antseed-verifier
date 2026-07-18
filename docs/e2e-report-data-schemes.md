@@ -106,28 +106,32 @@ The seller config is byte-for-byte the standard flow except `BINDING_SCHEME` and
 that's the whole point: swapping providers is config, and each provider's binding is a frozen
 registry entry the buyer verifies, not provider-specific SDK code.
 
-### GPU-CC caveat (must confirm before trusting a pass)
+### GPU-CC nonce (confirmed against live Chutes)
 
-`seller-provider-gpu-cc` submits an NRAS nonce and checks `eat_nonce`. Chutes very likely
-binds the GPU to the **derived** `SHA-256(nonce‖pubkey)` (= `noncePubkeySha256V1.gpuNonce`),
-not the raw nonce. Two steps to turn it on:
-1. **Probe once** (needs the Chutes key): fetch evidence for a known nonce, submit the GPU
-   evidence to NRAS with (a) the raw nonce and (b) the derived value, see which `eat_nonce`
-   NRAS echoes. This is a ~15-line script, no GPU rented.
-2. **Wire** `gpu-cc` to use `scheme.gpuNonce(nonce, {e2ePubkey})` when a provider binding
-   scheme is configured (today it always submits the raw nonce). Small, but land it only
-   after the probe confirms the value — otherwise a pass/fail would be meaningless.
+`seller-provider-gpu-cc` submits an NRAS nonce and checks `eat_nonce`. Confirmed against a
+live Chutes Blackwell instance: the GPU evidence binds the **derived**
+`SHA-256(nonce_hex ‖ pubkey_b64)` (= `noncePubkeySha256V1.gpuNonce`), NOT the raw nonce —
+NRAS returns `x-nvidia-overall-att-result: true` for the derived value and `false` for the
+raw one. So the remaining work is only mechanical wiring:
+1. Reshape Chutes' `gpu_evidence` (a flat `[{arch, evidence, certificate}]`) into the SDK's
+   `{arch, evidence_list: [{evidence, certificate}]}` (the shim's job, alongside the auth +
+   instance join it already does).
+2. Wire `gpu-cc` to submit `scheme.gpuNonce(nonce, {e2ePubkey})` when a provider binding
+   scheme is configured (today it submits the raw nonce).
 
-Until then, run the Chutes flow for provider-TEE + measured-image (both real, no GPU), and
-treat gpu-cc as pending the probe.
+Both are small; the nonce derivation itself is proven.
 
 ---
 
-## What's verified vs. documented
+## What's verified
 
-- **Unit-verified (140 tests):** the `report-data.ts` schemes, node convergence to
+- **Unit (140 tests):** the `report-data.ts` schemes, node convergence to
   `antseed-rd-v1 {peerId}`, and the provider cap's scheme-binding check (pass + fail-closed).
-- **Hardware-verified:** the node configfs quote's report_data equals our computed 64 bytes and
-  DCAP-verifies (construction-agnostic, so it holds for `antseed-rd-v1`).
-- **Documented, not yet run this session:** the provider stand-in on a live VM, the Chutes
-  auth/instance shim, and the gpu-cc probe (needs a Chutes API key).
+- **Live Chutes (`Qwen/Qwen3-32B-TEE`), via the real SDK code path:** a fetched provider quote
+  DCAP-verifies `UpToDate` (genuine TD10, debug off); its `report_data[0:32]` matches
+  `nonce-pubkey-sha256-v1` for a buyer-chosen nonce (5/5 joined instances); and the
+  `seller-provider-tee-genuine` cap returns `ok: true, "bound to this round"` through the
+  actual collector + `verifyTdxEvidence` + provider-cap path. GPUs are Blackwell in CC mode;
+  the derived GPU nonce verifies at NRAS (`overall-att-result: true`).
+- **Hardware (GCP TDX):** the node configfs quote's report_data equals our computed bytes and
+  DCAP-verifies.

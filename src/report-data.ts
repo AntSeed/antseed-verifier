@@ -91,8 +91,9 @@ export const noncePubkeySha256V1: ReportDataScheme = {
     return new Uint8Array(rd)
   },
   gpuNonce(nonce, ing) {
-    // NOTE: unconfirmed against live Chutes — their GPU eat_nonce is very likely this derived
-    // value, but confirm with one authenticated call before trusting a gpu-cc pass.
+    // The GPU evidence's NRAS eat_nonce is this derived value, SHA-256(nonce_hex ‖ pubkey_b64) —
+    // the same commitment report_data[0:32] carries. (NRAS returns overall-att-result true only
+    // for this value, not the raw nonce.)
     return this.build(nonce, ing).subarray(0, 32)
   },
 }
