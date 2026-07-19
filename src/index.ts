@@ -10,6 +10,21 @@ import proverPlugin from './prover.js'
 export default verifierPlugin
 export const prover = proverPlugin
 
+// The AntSeed plugin contract this SDK implements (vendored; self-contained types).
+export type {
+  AntseedPluginBase,
+  AntseedVerifierPlugin,
+  Prover,
+  VerifyContext,
+  VerifyResult,
+  ClaimResult,
+  SellerRequest,
+  SellerResponse,
+} from './antseed-node-types.js'
+
+// Self-hosted TDX quote minting (configfs-tsm) — for provider tooling that adopts antseed-rd-v1.
+export { generateTdxQuote } from './collect/configfs.js'
+
 // Capability model — the menu, its registry, and helpers.
 export type {
   Capability,

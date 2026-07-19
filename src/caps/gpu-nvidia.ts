@@ -1,5 +1,5 @@
 import type { JWTVerifyGetKey } from 'jose'
-import type { ClaimResult } from '@antseed/node'
+import type { ClaimResult } from '../antseed-node-types.js'
 import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '../capability.js'
 import { claimId } from '../shared.js'
 import { collectJsonFieldViaHttp } from '../collect/http.js'

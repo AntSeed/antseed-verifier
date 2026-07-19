@@ -33,8 +33,7 @@ A tiny provider that generates a key inside the (same) TDX VM, mints a quote bou
 // provider-standin.mjs  — run with:  sudo node provider-standin.mjs   (configfs needs root)
 import { createServer } from 'node:http'
 import { generateKeyPairSync } from 'node:crypto'
-import { antseedRdV1 } from '@refoundhq/antseed-verifier'
-import { generateTdxQuote } from '@refoundhq/antseed-verifier/dist/collect/configfs.js'
+import { antseedRdV1, generateTdxQuote } from '@refoundhq/antseed-verifier'
 
 // One TEE-generated key for this instance; its pubkey is bound into report_data.
 const { publicKey } = generateKeyPairSync('ed25519')

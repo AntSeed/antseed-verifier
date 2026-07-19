@@ -69,12 +69,12 @@ capabilities its infrastructure supports; the buyer verifies each:
 
   ```
   report_data[ 0:32] = SHA-256( "antseed-provider-report-data-v1" ‖ nonce ‖ SHA-256(claimsDocBytes) )
-  report_data[32:64] = SHA-256( gpuEvidenceBytes )   // reserved for the gpu-cc cap
+  report_data[32:64] = reserved   // gpu-cc binds the GPU independently via the NRAS nonce
   ```
 
   `claimsReportData(nonce, docBytes)` returns the 32-byte `[0:32]` commitment; the buyer
-  compares it against the provider quote's first half. (The node cap keeps its own
-  `SHA-512(nonce ‖ peerId)` — it binds identity, not a payload.)
+  compares it against the provider quote's first half. (The node cap uses the separate
+  `antseed-rd-v1` `{peerId}` binding — see below — as it binds identity, not a payload.)
 
 The buyer requires `seller-node-tee-genuine` and `seller-bound`; the rest are
 reported informationally. Provider differences are handled only by generic,
@@ -138,10 +138,11 @@ policy knobs from the environment:
 
 - `ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY` — the `seller-provider-measured-image`
   allow-list, as inline JSON (`{"approvedMeasurements":[{"mrtd":"…"}]}`) or `@/path.json`.
-  Without it the cap reports `ok:false` ("no approved measurement set configured"). Interim
-  until `@antseed/node`'s `VerifyContext` carries buyer policy.
+  Without it the cap reports `ok:false` ("no approved measurement set configured").
 - `ANTSEED_VERIFIER_STRICT_TCB` — set to `true` to require TCB status exactly `UpToDate`
   (rejecting `SWHardeningNeeded`). Default accepts both.
+- `ANTSEED_VERIFIER_NRAS_URL` / `ANTSEED_VERIFIER_NRAS_JWKS_URL` — override NVIDIA's NRAS
+  attest + JWKS endpoints used by `seller-provider-gpu-cc` (default to NVIDIA's production URLs).
 
 ### report_data binding schemes
 
@@ -171,11 +172,9 @@ npm run build
 npm test
 ```
 
-`@antseed/node` is a peer dependency supplied by the AntSeed runtime. For local
-development it links from a monorepo checkout beside this repo
-(`../antseed-refound/main/packages/node`); adjust the devDependency path if your
-layout differs. Once `@antseed/node` is published to npm, the peer dependency
-resolves without a local link.
+The package is self-contained — no peer dependencies. The AntSeed plugin contract it
+implements is vendored (`src/antseed-node-types.ts`) and re-exported, so consumers build
+against this package alone; the AntSeed runtime loads the plugin structurally.
 
 ## Status
 

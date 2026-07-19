@@ -1,4 +1,4 @@
-import type { Prover, SellerRequest, SellerResponse } from '@antseed/node'
+import type { Prover, SellerRequest, SellerResponse } from './antseed-node-types.js'
 import './caps/index.js' // side-effect: register the capability menu
 import { listCapabilities } from './capability.js'
 import { evmAddressFromPrivateKey, signerFromPrivateKey } from './caps/seller-bound.js'

@@ -1,4 +1,4 @@
-import type { ClaimResult } from '@antseed/node'
+import type { ClaimResult } from './antseed-node-types.js'
 
 /**
  * A Capability is one independent seller attestation. The SDK offers a menu of them;

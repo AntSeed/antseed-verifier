@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import type { AntseedVerifierPlugin, ClaimResult, VerifyContext, VerifyResult } from '@antseed/node'
+import type { AntseedVerifierPlugin, ClaimResult, VerifyContext, VerifyResult } from './antseed-node-types.js'
 import './caps/index.js' // side-effect: register the capability menu
 import { capabilityIds, getCapability } from './capability.js'
 import {
