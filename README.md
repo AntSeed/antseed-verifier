@@ -119,6 +119,9 @@ values:
   `seller-provider-tee-genuine` is offered via `http`.
 - `ANTSEED_VERIFIER_PROVIDER_TEE_FIELD` — the JSON field of that route's response
   holding the base64 provider quote (defaults to `quote`).
+- `ANTSEED_VERIFIER_PROVIDER_GPU_FIELD` — the JSON field holding the provider's per-GPU
+  NVIDIA CC evidence; when set (with the evidence URL), `seller-provider-gpu-cc` is offered
+  off the same route.
 - `ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD` — the JSON field of that route's response
   holding the base64 provider claims document; when set (with the evidence URL),
   `seller-provider-claims` is offered off the same route.
@@ -130,7 +133,7 @@ values:
 - `ANTSEED_VERIFIER_SIGNING_KEY` — the seller identity key (hex) that produces
   `seller-bound` signatures; the cap is disabled if its address != the peer id.
 
-The verifier (buyer) half has no special hardware requirement, and reads two optional
+The verifier (buyer) half has no special hardware requirement, and reads a few optional
 policy knobs from the environment:
 
 - `ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY` — the `seller-provider-measured-image`

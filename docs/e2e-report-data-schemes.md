@@ -17,9 +17,9 @@ What's verified where:
 - `seller-provider-measured-image` — MRTD/RTMR vs a buyer allow-list (env policy, A5).
 - `seller-provider-gpu-cc` — NRAS; see the GPU caveat under the Chutes flow.
 
-Provision + stage the seller/buyer exactly as `docs/e2e-caps.md` describes (c3 TDX VM,
-`npm pack` the SDK into `~/.antseed-seller/plugins`, run seller as root). Below covers only
-the provider wiring that's new.
+Provision + stage the seller/buyer the usual way (a c3 Intel TDX VM, `npm pack` the SDK into
+the seller's `~/.antseed/plugins`, run the seller as root so `configfs` quote minting works).
+Below covers only the provider wiring that's new.
 
 ---
 
@@ -49,7 +49,7 @@ createServer((req, res) => {
 }).listen(9000)
 ```
 
-Seller env (adds two lines to the `docs/e2e-caps.md` config):
+Seller env (adds two lines to the seller config):
 
 ```bash
 export ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL='http://127.0.0.1:9000/evidence?nonce={nonce}'
