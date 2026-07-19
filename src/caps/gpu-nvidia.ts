@@ -1,5 +1,5 @@
 import type { JWTVerifyGetKey } from 'jose'
-import type { ClaimResult } from '@antseed/node'
+import type { ClaimResult } from '../antseed-node-types.js'
 import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '../capability.js'
 import { claimId } from '../shared.js'
 import { collectJsonFieldViaHttp } from '../collect/http.js'
@@ -22,11 +22,8 @@ import {
  *
  * INFORMATIONAL, not required: a CPU-only seller (no GPUs) must still verify, so this cap is
  * never in the buyer's required set. It's offered only when the seller configures a provider
- * evidence route AND a GPU evidence field; otherwise the seller simply omits it.
- *
- * The buyer-side check goes through an injectable GpuVerifyFn (mirrors tee-tdx's VerifyQuoteFn),
- * so a future OFFLINE verifier (nvtrust-style: report + NVIDIA device cert chain + RIM, no
- * external service) drops in with zero changes to this cap.
+ * evidence route AND a GPU evidence field; otherwise the seller simply omits it. The buyer-side
+ * check goes through an injectable GpuVerifyFn (see below) so a future offline verifier drops in.
  */
 
 const CAP_ID = 'seller-provider-gpu-cc'
@@ -54,8 +51,7 @@ export type GpuVerifyFn = (evidence: Uint8Array, nonce: Uint8Array) => Promise<G
 
 /** Decode the provider's GPU evidence bytes (JSON: { arch, evidence_list }). */
 function decodeGpuEvidence(bytes: Uint8Array): NvidiaGpuEvidence {
-  const parsed = JSON.parse(new TextDecoder().decode(bytes)) as NvidiaGpuEvidence
-  return parsed
+  return JSON.parse(new TextDecoder().decode(bytes)) as NvidiaGpuEvidence
 }
 
 /** Config for the NRAS verifier; all optional so production uses NVIDIA defaults + real JWKS. */

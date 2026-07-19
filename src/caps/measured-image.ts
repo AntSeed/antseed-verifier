@@ -1,4 +1,4 @@
-import type { ClaimResult } from '@antseed/node'
+import type { ClaimResult } from '../antseed-node-types.js'
 import type { Capability, CapabilityVerifyInput } from '../capability.js'
 import type { ParsedTdxQuote } from './tee-tdx.js'
 import { claimId } from '../shared.js'
@@ -60,6 +60,9 @@ export const measuredImageCapability: Capability = {
     if (!approved.some((m) => matches(m, p.td))) {
       return { claim, ok: false, detail: `MRTD ${hex(p.td.mrTd).slice(0, 16)}… matches no approved measurement` }
     }
-    return { claim, ok: true, detail: `measurements match an approved image (MRTD ${hex(p.td.mrTd).slice(0, 16)}…)` }
+    // A matching measurement on its own says nothing about freshness: without a report_data
+    // scheme binding this quote to the round, it could be a genuine but replayed/borrowed quote.
+    const caveat = p.binding ? '' : ' (freshness/instance binding NOT verified — no report_data scheme declared)'
+    return { claim, ok: true, detail: `measurements match an approved image (MRTD ${hex(p.td.mrTd).slice(0, 16)}…)${caveat}` }
   },
 }

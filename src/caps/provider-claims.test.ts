@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { randomBytes } from 'node:crypto'
-import type { ClaimResult } from '@antseed/node'
+import type { ClaimResult } from '../antseed-node-types.js'
 import {
   PROVIDER_CLAIMS_CAP_ID,
   PROVIDER_CLAIMS_MENU,

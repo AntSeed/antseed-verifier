@@ -43,38 +43,35 @@ capabilities its infrastructure supports; the buyer verifies each:
   (not yet built). Informational, never required (a CPU-only seller still verifies).
 - **`seller-provider-claims`** — carries the provider's claims into the protocol with
   per-claim granularity: one claim per entry
-  (`refoundhq-antseed-verifier:seller-provider-claims/<name>`), so buyer policy can act
-  on individual provider guarantees. The claims menu is **frozen in the SDK**
-  (`PROVIDER_CLAIMS_MENU`), never supplied by the seller or provider: each menu entry
-  fixes the claim's meaning, its value validator, and the proof level it requires, and
-  the SDK ships version-pinned through the CLI's curated trust registry — every buyer
-  runs identical frozen verification logic, so trusting a claim requires trusting only
-  this SDK + the evidence origin. Names outside the menu can never pass; growing the
-  menu is an SDK version bump. The provider's document supplies VALUES only
+  (`refoundhq-antseed-verifier:seller-provider-claims/<name>`), so buyer policy can act on
+  individual guarantees. The claims menu is **frozen in the SDK** (`PROVIDER_CLAIMS_MENU`),
+  never supplied by the seller or provider and version-pinned through the CLI's trust
+  registry, so every buyer runs identical verification; names outside the menu can never
+  pass, and growing it is an SDK version bump. The provider's document supplies VALUES only
   (provider-authored bytes, carried verbatim):
 
   ```json
   { "version": 1, "claims": { "<name>": <value> } }
   ```
 
-  Frozen proof levels: `asserted` (may pass on whole-bundle `seller-bound` integrity
-  alone — reported as "provider-asserted only, NOT independently verified") and
-  `tdx-quote` (passes ONLY when the provider's DCAP-verified TDX quote commits to the
-  exact document in its `report_data`; a bound document upgrades asserted-level claims
-  to TEE-attested too). v0.1 menu: `model-id` (asserted) and `serving-image-digest`
-  (tdx-quote). Informational, never required.
+  Frozen proof levels: `asserted` (may pass on whole-bundle `seller-bound` integrity alone —
+  reported as "provider-asserted only, NOT independently verified") and `tdx-quote` (passes
+  ONLY when the provider's DCAP-verified TDX quote commits to the exact document in its
+  `report_data`; a bound document upgrades asserted-level claims to TEE-attested too). v0.1
+  menu: `model-id` (asserted) and `serving-image-digest` (tdx-quote). Informational, never
+  required.
 
   The provider quote uses ONE canonical 64-byte `report_data` layout (domain-separated,
   so a single provider quote serves every provider cap at once):
 
   ```
   report_data[ 0:32] = SHA-256( "antseed-provider-report-data-v1" ‖ nonce ‖ SHA-256(claimsDocBytes) )
-  report_data[32:64] = SHA-256( gpuEvidenceBytes )   // reserved for the gpu-cc cap
+  report_data[32:64] = reserved   // gpu-cc binds the GPU independently via the NRAS nonce
   ```
 
   `claimsReportData(nonce, docBytes)` returns the 32-byte `[0:32]` commitment; the buyer
-  compares it against the provider quote's first half. (The node cap keeps its own
-  `SHA-512(nonce ‖ peerId)` — it binds identity, not a payload.)
+  compares it against the provider quote's first half. (The node cap uses the separate
+  `antseed-rd-v1` `{peerId}` binding — see below — as it binds identity, not a payload.)
 
 The buyer requires `seller-node-tee-genuine` and `seller-bound`; the rest are
 reported informationally. Provider differences are handled only by generic,
@@ -122,6 +119,9 @@ values:
   `seller-provider-tee-genuine` is offered via `http`.
 - `ANTSEED_VERIFIER_PROVIDER_TEE_FIELD` — the JSON field of that route's response
   holding the base64 provider quote (defaults to `quote`).
+- `ANTSEED_VERIFIER_PROVIDER_GPU_FIELD` — the JSON field holding the provider's per-GPU
+  NVIDIA CC evidence; when set (with the evidence URL), `seller-provider-gpu-cc` is offered
+  off the same route.
 - `ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD` — the JSON field of that route's response
   holding the base64 provider claims document; when set (with the evidence URL),
   `seller-provider-claims` is offered off the same route.
@@ -133,15 +133,16 @@ values:
 - `ANTSEED_VERIFIER_SIGNING_KEY` — the seller identity key (hex) that produces
   `seller-bound` signatures; the cap is disabled if its address != the peer id.
 
-The verifier (buyer) half has no special hardware requirement, and reads two optional
+The verifier (buyer) half has no special hardware requirement, and reads a few optional
 policy knobs from the environment:
 
 - `ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY` — the `seller-provider-measured-image`
   allow-list, as inline JSON (`{"approvedMeasurements":[{"mrtd":"…"}]}`) or `@/path.json`.
-  Without it the cap reports `ok:false` ("no approved measurement set configured"). Interim
-  until `@antseed/node`'s `VerifyContext` carries buyer policy.
+  Without it the cap reports `ok:false` ("no approved measurement set configured").
 - `ANTSEED_VERIFIER_STRICT_TCB` — set to `true` to require TCB status exactly `UpToDate`
   (rejecting `SWHardeningNeeded`). Default accepts both.
+- `ANTSEED_VERIFIER_NRAS_URL` / `ANTSEED_VERIFIER_NRAS_JWKS_URL` — override NVIDIA's NRAS
+  attest + JWKS endpoints used by `seller-provider-gpu-cc` (default to NVIDIA's production URLs).
 
 ### report_data binding schemes
 
@@ -171,11 +172,9 @@ npm run build
 npm test
 ```
 
-`@antseed/node` is a peer dependency supplied by the AntSeed runtime. For local
-development it links from a monorepo checkout beside this repo
-(`../antseed-refound/main/packages/node`); adjust the devDependency path if your
-layout differs. Once `@antseed/node` is published to npm, the peer dependency
-resolves without a local link.
+The package is self-contained — no peer dependencies. The AntSeed plugin contract it
+implements is vendored (`src/antseed-node-types.ts`) and re-exported, so consumers build
+against this package alone; the AntSeed runtime loads the plugin structurally.
 
 ## Status
 

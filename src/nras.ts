@@ -83,14 +83,17 @@ export function buildNrasRequest(evidence: NvidiaGpuEvidence, nonce: Uint8Array)
   }
 }
 
-/** Default submit: POST JSON to NRAS. Network / non-2xx errors bubble up (caller marks transient). */
+/** Default submit: POST JSON to NRAS with a hard timeout. Network / non-2xx errors bubble up (caller marks transient). */
 export const defaultNrasSubmit: NrasSubmitFn = async (url, body) => {
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20_000),
   })
   if (!resp.ok) throw new Error(`NRAS returned HTTP ${resp.status}`)
+  const declared = Number(resp.headers?.get('content-length') ?? '0')
+  if (declared > 4 * 1024 * 1024) throw new Error(`NRAS response too large (${declared} bytes)`)
   return resp.json()
 }
 

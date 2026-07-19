@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { randomBytes } from 'node:crypto'
-import type { SellerRequest, SellerResponse, VerifyContext } from '@antseed/node'
+import type { SellerRequest, SellerResponse, VerifyContext } from './antseed-node-types.js'
 import { runVerify } from './verifier.js'
 import {
   ATTEST_PATH,

@@ -1,13 +1,9 @@
 /**
- * Generic HTTP collector: fetch a TDX quote from a seller-configured attestation
- * endpoint. Everything provider-specific (host, path, where the quote sits in the JSON)
- * is supplied by the caller — there are NO hardcoded hosts or schemas here, so any HTTP
- * attestation service can be wired up purely through config.
- *
- * Arguments:
- *   urlTemplate  the endpoint; any {nonce} placeholder is replaced with the HEX nonce
- *   nonce        the buyer's freshness nonce (used only for {nonce} substitution)
- *   field        dot-path to the base64 quote in the JSON response (e.g. "quote" or "data.quote")
+ * Generic HTTP collector: fetch a TDX quote from a seller-configured attestation endpoint.
+ * Everything provider-specific (host, path, JSON location of the quote) comes from the caller
+ * — no hardcoded hosts or schemas — so any HTTP attestation service wires up purely through
+ * config. `urlTemplate`'s {nonce} placeholder is substituted with the hex nonce; `field` is a
+ * dot-path to the base64 quote in the response (e.g. "quote" or "data.quote").
  */
 
 /** Resolve a dot-separated path (e.g. "data.quote") against a parsed JSON value. */
@@ -18,6 +14,25 @@ function pluck(obj: unknown, path: string): unknown {
     }
     return undefined
   }, obj)
+}
+
+/** Hard timeout on an outbound evidence fetch — a hung/slow provider can't stall the round. */
+const FETCH_TIMEOUT_MS = 20_000
+/** Reject an over-large declared response body so a hostile endpoint can't force an OOM parse. */
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+/** Substitute {nonce}, fetch with a timeout + size guard, and parse JSON. */
+async function fetchAttestJson(urlTemplate: string, nonce: Uint8Array): Promise<unknown> {
+  const url = urlTemplate.replace(/\{nonce\}/g, Buffer.from(nonce).toString('hex'))
+  const resp = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+  if (!resp.ok) {
+    throw new Error(`http attestation endpoint returned HTTP ${resp.status}`)
+  }
+  const declared = Number(resp.headers?.get('content-length') ?? '0')
+  if (declared > MAX_RESPONSE_BYTES) {
+    throw new Error(`http attestation response too large (${declared} bytes)`)
+  }
+  return resp.json()
 }
 
 /**
@@ -32,12 +47,7 @@ export async function collectTdxAndPubkey(
   quoteField: string,
   pubkeyField?: string,
 ): Promise<{ quote: Uint8Array; pubkey?: string }> {
-  const url = urlTemplate.replace(/\{nonce\}/g, Buffer.from(nonce).toString('hex'))
-  const resp = await fetch(url)
-  if (!resp.ok) {
-    throw new Error(`http attestation endpoint returned HTTP ${resp.status}`)
-  }
-  const json: unknown = await resp.json()
+  const json = await fetchAttestJson(urlTemplate, nonce)
   const q = pluck(json, quoteField)
   if (typeof q !== 'string' || q.length === 0) {
     throw new Error(`http attestation response has no base64 quote at "${quoteField}"`)
@@ -59,12 +69,7 @@ export async function collectViaHttp(
   nonce: Uint8Array,
   field: string,
 ): Promise<Uint8Array> {
-  const url = urlTemplate.replace(/\{nonce\}/g, Buffer.from(nonce).toString('hex'))
-  const resp = await fetch(url)
-  if (!resp.ok) {
-    throw new Error(`http attestation endpoint returned HTTP ${resp.status}`)
-  }
-  const json: unknown = await resp.json()
+  const json = await fetchAttestJson(urlTemplate, nonce)
   const value = pluck(json, field)
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`http attestation response has no base64 quote at "${field}"`)
@@ -87,12 +92,7 @@ export async function collectJsonFieldViaHttp(
   nonce: Uint8Array,
   field: string,
 ): Promise<Uint8Array> {
-  const url = urlTemplate.replace(/\{nonce\}/g, Buffer.from(nonce).toString('hex'))
-  const resp = await fetch(url)
-  if (!resp.ok) {
-    throw new Error(`http attestation endpoint returned HTTP ${resp.status}`)
-  }
-  const json: unknown = await resp.json()
+  const json = await fetchAttestJson(urlTemplate, nonce)
   const value = pluck(json, field)
   if (value === undefined || value === null) {
     throw new Error(`http attestation response has no value at "${field}"`)

@@ -17,9 +17,9 @@ What's verified where:
 - `seller-provider-measured-image` — MRTD/RTMR vs a buyer allow-list (env policy, A5).
 - `seller-provider-gpu-cc` — NRAS; see the GPU caveat under the Chutes flow.
 
-Provision + stage the seller/buyer exactly as `docs/e2e-caps.md` describes (c3 TDX VM,
-`npm pack` the SDK into `~/.antseed-seller/plugins`, run seller as root). Below covers only
-the provider wiring that's new.
+Provision + stage the seller/buyer the usual way (a c3 Intel TDX VM, `npm pack` the SDK into
+the seller's `~/.antseed/plugins`, run the seller as root so `configfs` quote minting works).
+Below covers only the provider wiring that's new.
 
 ---
 
@@ -33,8 +33,7 @@ A tiny provider that generates a key inside the (same) TDX VM, mints a quote bou
 // provider-standin.mjs  — run with:  sudo node provider-standin.mjs   (configfs needs root)
 import { createServer } from 'node:http'
 import { generateKeyPairSync } from 'node:crypto'
-import { antseedRdV1 } from '@refoundhq/antseed-verifier'
-import { generateTdxQuote } from '@refoundhq/antseed-verifier/dist/collect/configfs.js'
+import { antseedRdV1, generateTdxQuote } from '@refoundhq/antseed-verifier'
 
 // One TEE-generated key for this instance; its pubkey is bound into report_data.
 const { publicKey } = generateKeyPairSync('ed25519')
@@ -50,7 +49,7 @@ createServer((req, res) => {
 }).listen(9000)
 ```
 
-Seller env (adds two lines to the `docs/e2e-caps.md` config):
+Seller env (adds two lines to the seller config):
 
 ```bash
 export ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL='http://127.0.0.1:9000/evidence?nonce={nonce}'
@@ -66,9 +65,6 @@ Expected verdict:
 - `seller-provider-tee-genuine` PASS — the provider quote's report_data equals
   `antseed-rd-v1 {e2ePubkey}` for this nonce. Flip one byte of the stand-in's pubkey and it
   must fail with `report_data does not match scheme "antseed-rd-v1"`.
-
-This exercises the full new path on real hardware, provider-neutrally: the stand-in is just
-"a provider that adopted our canonical scheme."
 
 ---
 
@@ -125,7 +121,7 @@ Both are small; the nonce derivation itself is proven.
 
 ## What's verified
 
-- **Unit (140 tests):** the `report-data.ts` schemes, node convergence to
+- **Unit (141 tests):** the `report-data.ts` schemes, node convergence to
   `antseed-rd-v1 {peerId}`, and the provider cap's scheme-binding check (pass + fail-closed).
 - **Live Chutes (`Qwen/Qwen3-32B-TEE`), via the real SDK code path:** a fetched provider quote
   DCAP-verifies `UpToDate` (genuine TD10, debug off); its `report_data[0:32]` matches

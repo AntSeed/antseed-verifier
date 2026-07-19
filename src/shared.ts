@@ -60,20 +60,21 @@ const SELLER_BOUND_CAP_ID = 'seller-bound'
 /**
  * Canonical digest over the WHOLE attestation bundle — every cap's evidence entry
  * EXCEPT seller-bound's own signature (it cannot sign over itself). Sorting by cap id
- * makes both halves agree regardless of map iteration order; length-prefixing each
- * entry (capId ‖ len(4 bytes BE) ‖ bytes) keeps the concatenation unambiguous so no
- * cap can shift bytes across an entry boundary. One seller signature therefore covers
+ * makes both halves agree regardless of map iteration order; length-prefixing BOTH the id
+ * and the bytes (len(id) ‖ id ‖ len(bytes) ‖ bytes) keeps the concatenation unambiguous so
+ * no cap can shift bytes across an entry boundary. One seller signature therefore covers
  * the node quote AND the provider quote (and any future caps) together.
  */
 export function bundleDigest(evidence: Record<string, Uint8Array>): Uint8Array {
   const ids = Object.keys(evidence).filter((id) => id !== SELLER_BOUND_CAP_ID).sort()
   const h = createHash('sha256')
+  const u32 = (n: number): Buffer => { const b = Buffer.alloc(4); b.writeUInt32BE(n, 0); return b }
   for (const id of ids) {
     const bytes = evidence[id]!
-    const len = Buffer.alloc(4)
-    len.writeUInt32BE(bytes.length, 0)
-    h.update(Buffer.from(id, 'utf8'))
-    h.update(len)
+    const idBuf = Buffer.from(id, 'utf8')
+    h.update(u32(idBuf.length))
+    h.update(idBuf)
+    h.update(u32(bytes.length))
     h.update(Buffer.from(bytes))
   }
   return new Uint8Array(h.digest())

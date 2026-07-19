@@ -24,12 +24,12 @@ function td(over: Partial<TdMeasurements> = {}): TdMeasurements {
   }
 }
 
-function parsed(t: TdMeasurements | null): ParsedTdxQuote {
-  return { quoteEvidence: randomBytes(10), status: 'UpToDate', td: t }
+function parsed(t: TdMeasurements | null, bound = false): ParsedTdxQuote {
+  return { quoteEvidence: randomBytes(10), status: 'UpToDate', td: t, ...(bound ? { binding: { scheme: 'antseed-rd-v1', ingredients: {} } } : {}) }
 }
 
-function verify(t: TdMeasurements | null, policy?: MeasuredImagePolicy) {
-  return measuredImageCapability.verify({ nonce: NONCE, peerId: PEER, parsedQuote: parsed(t), policy })
+function verify(t: TdMeasurements | null, policy?: MeasuredImagePolicy, bound = false) {
+  return measuredImageCapability.verify({ nonce: NONCE, peerId: PEER, parsedQuote: parsed(t, bound), policy })
 }
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString('hex')
@@ -41,10 +41,17 @@ describe('measured-image capability', () => {
     expect(r.detail).toMatch(/no approved measurement set configured/)
   })
 
-  it('passes when MRTD matches an approved measurement (mrtd only)', () => {
+  it('passes when MRTD matches an approved measurement (mrtd only), with a freshness caveat when unbound', () => {
     const r = verify(td(), { approvedMeasurements: [{ mrtd: hex(MRTD) }] })
     expect(r.ok).toBe(true)
     expect(r.detail).toMatch(/match an approved image/)
+    expect(r.detail).toMatch(/freshness\/instance binding NOT verified/)
+  })
+
+  it('drops the freshness caveat when the provider quote declares a report_data scheme', () => {
+    const r = verify(td(), { approvedMeasurements: [{ mrtd: hex(MRTD) }] }, true)
+    expect(r.ok).toBe(true)
+    expect(r.detail).not.toMatch(/freshness/)
   })
 
   it('matches case-insensitively and also checks provided RTMRs', () => {

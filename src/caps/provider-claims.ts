@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { ClaimResult } from '@antseed/node'
+import type { ClaimResult } from '../antseed-node-types.js'
 import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '../capability.js'
 import { claimId } from '../shared.js'
 import { collectViaHttp } from '../collect/http.js'
@@ -8,15 +8,9 @@ import { isTcbAcceptable, type ParsedTdxQuote } from './tee-tdx.js'
 /**
  * Capability 'seller-provider-claims': carries the inference PROVIDER's claims into the
  * protocol with per-claim granularity — one ClaimResult per claim, namespaced
- * '<verifier>:seller-provider-claims/<name>'.
- *
- * The claims menu is FROZEN IN THE SDK (PROVIDER_CLAIMS_MENU below), never supplied by
- * the seller or provider: each menu entry fixes the claim's meaning, its value validator
- * and the proof level it requires, and this SDK ships version-pinned through the CLI's
- * curated trust registry — so every buyer runs identical, frozen verification logic for
- * every claim, and trusting a claim requires trusting only this SDK + the evidence origin.
- * The provider's document supplies VALUES only ({ "<name>": <value> }); names outside
- * the menu can never pass. Growing the menu is an SDK version bump, re-pinned network-wide.
+ * '<verifier>:seller-provider-claims/<name>'. The claims menu is FROZEN IN THE SDK
+ * (PROVIDER_CLAIMS_MENU below), never supplied by the seller/provider; the provider's
+ * document supplies VALUES only ({ "<name>": <value> }).
  *
  * Frozen proof levels:
  *   'asserted'  the claim may pass on bundle integrity alone: the document rides in the
@@ -43,7 +37,7 @@ export function claimsConfigKey(key: string): string {
  * Provider quote report_data layout for TEE-attested claims:
  *
  *   report_data[ 0:32] = SHA-256( DOMAIN ‖ nonce(32) ‖ SHA-256(claimsDocBytes) )
- *   report_data[32:64] = SHA-256( gpuEvidenceBytes )   // owned by the gpu-cc cap
+ *   report_data[32:64] = reserved   // gpu-cc binds the GPU via the NRAS nonce, not this half
  *
  * `claimsReportData` returns the 32-byte [0:32] commitment; the verifier compares it against
  * the provider quote's first half.
@@ -154,7 +148,7 @@ function quoteBinding(
   if (!isTcbAcceptable(p.status)) return `provider TCB status not acceptable: ${p.status || 'unknown'}`
   if (!p.td) return 'provider quote is not an Intel TDX quote'
   if (p.td.debug === true) return 'provider TDX debug mode is enabled'
-  // Compare the canonical [0:32] commitment; [32:64] is the gpu-cc cap's half.
+  // Compare the canonical [0:32] commitment; [32:64] is reserved (gpu-cc binds via NRAS).
   const expected = claimsReportData(nonce, docBytes)
   const rd = p.td.reportData
   if (rd.length < 32 || !Buffer.from(rd.subarray(0, 32)).equals(Buffer.from(expected))) {
@@ -204,7 +198,7 @@ export const providerClaimsCapability: Capability = {
         claim,
         ok: true,
         detail: bindingFailure
-          ? `provider-asserted only, NOT independently verified (integrity/freshness via seller-bound): ${summarize(value)}`
+          ? `provider-asserted only, NOT independently verified: ${summarize(value)}`
           : `attested by provider TEE (report_data-bound TDX quote): ${summarize(value)}`,
       })
     }

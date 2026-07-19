@@ -1,4 +1,4 @@
-import type { ClaimResult } from '@antseed/node'
+import type { ClaimResult } from '../antseed-node-types.js'
 import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '../capability.js'
 import { claimId, computeReportData } from '../shared.js'
 import { generateTdxQuote } from '../collect/configfs.js'
@@ -39,17 +39,10 @@ export function tdxConfigKey(id: string, key: string): string {
 }
 
 /**
- * TCB statuses accepted as genuine hardware: current Intel platform TCB. SWHardeningNeeded
- * flags guest-side software mitigations only and does not impugn the hardware. Anything
- * else (OutOfDate, Revoked, Unknown, ...) is rejected.
- */
-export const ACCEPTABLE_TCB = new Set<string>(['UpToDate', 'SWHardeningNeeded'])
-
-/**
- * TCB acceptance. UpToDate is always genuine hardware. SWHardeningNeeded flags
- * guest-side software mitigations only — not a hardware compromise — and is accepted by
- * default (real GCP TDX quotes routinely report it); set ANTSEED_VERIFIER_STRICT_TCB=true
- * to require UpToDate exactly.
+ * TCB acceptance. UpToDate is always genuine hardware. SWHardeningNeeded flags guest-side
+ * software mitigations only — not a hardware compromise — and is accepted by default (real
+ * GCP TDX quotes routinely report it); set ANTSEED_VERIFIER_STRICT_TCB=true to require
+ * UpToDate exactly. Anything else (OutOfDate, Revoked, Unknown, ...) is rejected.
  */
 export function isTcbAcceptable(status: string): boolean {
   if (status === 'UpToDate') return true
@@ -196,7 +189,7 @@ function hex(b: Uint8Array): string {
 /**
  * Mint one TDX capability. `id` names the target (node vs provider); `defaultSource`
  * is the collector used when config supplies no `<id>.source` override:
- *   'configfs': self-hosted TDX minted locally; report_data = SHA-512(nonce ‖ peerId)
+ *   'configfs': self-hosted TDX minted locally; report_data = antseed-rd-v1 {peerId} (see report-data.ts)
  *   'http'    : a pre-made quote fetched from a config-supplied evidence route ({nonce} hex)
  * verify reads this cap's OWN parsed quote (the orchestrator DCAP-verifies each cap's
  * own evidence entry independently). collect throws when its source is unavailable
