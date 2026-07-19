@@ -1,0 +1,6 @@
+== Sun Jul 19 22:29:10 UTC 2026 ==
+Linux antseed-tdx-e2e.us-central1-a.c.antseed-tee.internal 6.17.0-1021-gcp #24~24.04.1-Ubuntu SMP Tue Jul  7 14:58:58 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+
+TDX configfs present:
+PRESENT
+v20.20.2
