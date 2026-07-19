@@ -11,11 +11,8 @@ import { randomBytes } from 'node:crypto'
 const TSM_REPORT_DIR = '/sys/kernel/config/tsm/report'
 
 /**
- * Generate a raw Intel TDX quote bound to `reportData` (64 bytes):
- *   1. mkdir a fresh report entry,
- *   2. write the 64-byte REPORTDATA to `inblob`,
- *   3. read the assembled quote from `outblob`,
- *   4. rmdir the entry.
+ * Generate a raw Intel TDX quote bound to `reportData` (64 bytes) via configfs-tsm: mkdir a
+ * report entry, write REPORTDATA to `inblob`, read the assembled quote from `outblob`, rmdir.
  */
 export function generateTdxQuote(reportData: Uint8Array): Uint8Array {
   if (reportData.length !== 64) {

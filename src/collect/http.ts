@@ -1,13 +1,9 @@
 /**
- * Generic HTTP collector: fetch a TDX quote from a seller-configured attestation
- * endpoint. Everything provider-specific (host, path, where the quote sits in the JSON)
- * is supplied by the caller — there are NO hardcoded hosts or schemas here, so any HTTP
- * attestation service can be wired up purely through config.
- *
- * Arguments:
- *   urlTemplate  the endpoint; any {nonce} placeholder is replaced with the HEX nonce
- *   nonce        the buyer's freshness nonce (used only for {nonce} substitution)
- *   field        dot-path to the base64 quote in the JSON response (e.g. "quote" or "data.quote")
+ * Generic HTTP collector: fetch a TDX quote from a seller-configured attestation endpoint.
+ * Everything provider-specific (host, path, JSON location of the quote) comes from the caller
+ * — no hardcoded hosts or schemas — so any HTTP attestation service wires up purely through
+ * config. `urlTemplate`'s {nonce} placeholder is substituted with the hex nonce; `field` is a
+ * dot-path to the base64 quote in the response (e.g. "quote" or "data.quote").
  */
 
 /** Resolve a dot-separated path (e.g. "data.quote") against a parsed JSON value. */

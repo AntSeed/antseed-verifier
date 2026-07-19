@@ -66,9 +66,6 @@ Expected verdict:
   `antseed-rd-v1 {e2ePubkey}` for this nonce. Flip one byte of the stand-in's pubkey and it
   must fail with `report_data does not match scheme "antseed-rd-v1"`.
 
-This exercises the full new path on real hardware, provider-neutrally: the stand-in is just
-"a provider that adopted our canonical scheme."
-
 ---
 
 ## Chutes flow — a live Chutes chute as the provider
@@ -124,7 +121,7 @@ Both are small; the nonce derivation itself is proven.
 
 ## What's verified
 
-- **Unit (140 tests):** the `report-data.ts` schemes, node convergence to
+- **Unit (141 tests):** the `report-data.ts` schemes, node convergence to
   `antseed-rd-v1 {peerId}`, and the provider cap's scheme-binding check (pass + fail-closed).
 - **Live Chutes (`Qwen/Qwen3-32B-TEE`), via the real SDK code path:** a fetched provider quote
   DCAP-verifies `UpToDate` (genuine TD10, debug off); its `report_data[0:32]` matches

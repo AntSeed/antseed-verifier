@@ -19,23 +19,16 @@ import {
  * assembles a per-cap evidence map. Unsupported caps are simply omitted. Provider
  * differences are handled purely by config (no provider specifics live here).
  *
- * Env config:
+ * Env config (each provider cap is offered only when the evidence URL AND its field are set,
+ * all off the SAME route):
  *   ANTSEED_TEE_PEER_ID                    this node's peer id (EVM address, no 0x) — required
  *   ANTSEED_VERIFIER_NODE_TEE              seller-node-tee-genuine source: "configfs" (default)
- *   ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL provider evidence route (with a {nonce} hex placeholder);
- *                                          when set, seller-provider-tee-genuine is offered via http
+ *   ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL provider evidence route ({nonce} hex placeholder); enables seller-provider-tee-genuine via http
  *   ANTSEED_VERIFIER_PROVIDER_TEE_FIELD    JSON field holding the base64 provider quote (default "quote")
- *   ANTSEED_VERIFIER_PROVIDER_GPU_FIELD    JSON field holding the provider's GPU CC evidence
- *                                          (e.g. "gpu_evidence"); when set (with the evidence URL),
- *                                          seller-provider-gpu-cc is offered off the SAME route
- *   ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD JSON field holding the provider's base64 claims document;
- *                                          when set (with the evidence URL), seller-provider-claims
- *                                          is offered off the SAME route
- *   ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME       frozen report_data scheme the provider's quote uses
- *                                          (e.g. "nonce-pubkey-sha256-v1" for Chutes); when set, the
- *                                          buyer verifies the provider quote is bound to this round
- *   ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD JSON field holding the provider's base64 E2E pubkey,
- *                                          the ingredient that scheme binds
+ *   ANTSEED_VERIFIER_PROVIDER_GPU_FIELD    JSON field holding the provider's GPU CC evidence; enables seller-provider-gpu-cc
+ *   ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD JSON field holding the provider's base64 claims document; enables seller-provider-claims
+ *   ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME       frozen report_data scheme the provider quote uses (e.g. "nonce-pubkey-sha256-v1"); buyer then verifies round binding
+ *   ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD JSON field holding the provider's base64 E2E pubkey (the ingredient that scheme binds)
  *   ANTSEED_VERIFIER_SIGNING_KEY           seller identity private key (hex) for seller-bound
  */
 

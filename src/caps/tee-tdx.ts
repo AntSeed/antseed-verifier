@@ -39,17 +39,10 @@ export function tdxConfigKey(id: string, key: string): string {
 }
 
 /**
- * TCB statuses accepted as genuine hardware: current Intel platform TCB. SWHardeningNeeded
- * flags guest-side software mitigations only and does not impugn the hardware. Anything
- * else (OutOfDate, Revoked, Unknown, ...) is rejected.
- */
-export const ACCEPTABLE_TCB = new Set<string>(['UpToDate', 'SWHardeningNeeded'])
-
-/**
- * TCB acceptance. UpToDate is always genuine hardware. SWHardeningNeeded flags
- * guest-side software mitigations only — not a hardware compromise — and is accepted by
- * default (real GCP TDX quotes routinely report it); set ANTSEED_VERIFIER_STRICT_TCB=true
- * to require UpToDate exactly.
+ * TCB acceptance. UpToDate is always genuine hardware. SWHardeningNeeded flags guest-side
+ * software mitigations only — not a hardware compromise — and is accepted by default (real
+ * GCP TDX quotes routinely report it); set ANTSEED_VERIFIER_STRICT_TCB=true to require
+ * UpToDate exactly. Anything else (OutOfDate, Revoked, Unknown, ...) is rejected.
  */
 export function isTcbAcceptable(status: string): boolean {
   if (status === 'UpToDate') return true

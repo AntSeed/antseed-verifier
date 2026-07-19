@@ -8,15 +8,9 @@ import { isTcbAcceptable, type ParsedTdxQuote } from './tee-tdx.js'
 /**
  * Capability 'seller-provider-claims': carries the inference PROVIDER's claims into the
  * protocol with per-claim granularity — one ClaimResult per claim, namespaced
- * '<verifier>:seller-provider-claims/<name>'.
- *
- * The claims menu is FROZEN IN THE SDK (PROVIDER_CLAIMS_MENU below), never supplied by
- * the seller or provider: each menu entry fixes the claim's meaning, its value validator
- * and the proof level it requires, and this SDK ships version-pinned through the CLI's
- * curated trust registry — so every buyer runs identical, frozen verification logic for
- * every claim, and trusting a claim requires trusting only this SDK + the evidence origin.
- * The provider's document supplies VALUES only ({ "<name>": <value> }); names outside
- * the menu can never pass. Growing the menu is an SDK version bump, re-pinned network-wide.
+ * '<verifier>:seller-provider-claims/<name>'. The claims menu is FROZEN IN THE SDK
+ * (PROVIDER_CLAIMS_MENU below), never supplied by the seller/provider; the provider's
+ * document supplies VALUES only ({ "<name>": <value> }).
  *
  * Frozen proof levels:
  *   'asserted'  the claim may pass on bundle integrity alone: the document rides in the

@@ -43,26 +43,23 @@ capabilities its infrastructure supports; the buyer verifies each:
   (not yet built). Informational, never required (a CPU-only seller still verifies).
 - **`seller-provider-claims`** — carries the provider's claims into the protocol with
   per-claim granularity: one claim per entry
-  (`refoundhq-antseed-verifier:seller-provider-claims/<name>`), so buyer policy can act
-  on individual provider guarantees. The claims menu is **frozen in the SDK**
-  (`PROVIDER_CLAIMS_MENU`), never supplied by the seller or provider: each menu entry
-  fixes the claim's meaning, its value validator, and the proof level it requires, and
-  the SDK ships version-pinned through the CLI's curated trust registry — every buyer
-  runs identical frozen verification logic, so trusting a claim requires trusting only
-  this SDK + the evidence origin. Names outside the menu can never pass; growing the
-  menu is an SDK version bump. The provider's document supplies VALUES only
+  (`refoundhq-antseed-verifier:seller-provider-claims/<name>`), so buyer policy can act on
+  individual guarantees. The claims menu is **frozen in the SDK** (`PROVIDER_CLAIMS_MENU`),
+  never supplied by the seller or provider and version-pinned through the CLI's trust
+  registry, so every buyer runs identical verification; names outside the menu can never
+  pass, and growing it is an SDK version bump. The provider's document supplies VALUES only
   (provider-authored bytes, carried verbatim):
 
   ```json
   { "version": 1, "claims": { "<name>": <value> } }
   ```
 
-  Frozen proof levels: `asserted` (may pass on whole-bundle `seller-bound` integrity
-  alone — reported as "provider-asserted only, NOT independently verified") and
-  `tdx-quote` (passes ONLY when the provider's DCAP-verified TDX quote commits to the
-  exact document in its `report_data`; a bound document upgrades asserted-level claims
-  to TEE-attested too). v0.1 menu: `model-id` (asserted) and `serving-image-digest`
-  (tdx-quote). Informational, never required.
+  Frozen proof levels: `asserted` (may pass on whole-bundle `seller-bound` integrity alone —
+  reported as "provider-asserted only, NOT independently verified") and `tdx-quote` (passes
+  ONLY when the provider's DCAP-verified TDX quote commits to the exact document in its
+  `report_data`; a bound document upgrades asserted-level claims to TEE-attested too). v0.1
+  menu: `model-id` (asserted) and `serving-image-digest` (tdx-quote). Informational, never
+  required.
 
   The provider quote uses ONE canonical 64-byte `report_data` layout (domain-separated,
   so a single provider quote serves every provider cap at once):

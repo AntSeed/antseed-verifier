@@ -1,9 +1,8 @@
 /**
  * The AntSeed plugin contract this SDK implements, vendored so the published package is
- * self-contained (its `.d.ts` carry no external type dependency and it needs no peer
- * dependency to build for consumers). These interfaces mirror the AntSeed runtime's public
- * plugin surface; the runtime loads this SDK's default/`prover` exports structurally. Keep
- * them in sync if the runtime's plugin contract changes.
+ * self-contained (no external type dependency, no peer dependency to build). These interfaces
+ * mirror the AntSeed runtime's plugin surface, which loads this SDK's default/`prover` exports
+ * structurally; keep them in sync if that contract changes.
  */
 
 export interface AntseedPluginBase {
