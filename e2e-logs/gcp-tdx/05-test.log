@@ -1,0 +1,26 @@
+
+> @refoundhq/antseed-verifier@0.1.0 test
+> vitest run
+
+
+ RUN  v2.1.9 /opt/av
+
+ ✓ src/caps/provider-claims.test.ts (24 tests) 19ms
+ ✓ src/caps/tee-tdx.test.ts (18 tests) 63ms
+ ✓ src/verifier.test.ts (15 tests) 100ms
+ ✓ src/caps/gpu-nvidia.test.ts (12 tests) 23ms
+ ✓ src/nras.test.ts (11 tests) 37ms
+ ✓ src/shared.test.ts (17 tests) 22ms
+ ✓ src/caps/seller-bound.test.ts (14 tests) 74ms
+ ✓ src/report-data.test.ts (14 tests) 12ms
+ ✓ src/caps/measured-image.test.ts (7 tests) 5ms
+ ✓ src/collect/http.test.ts (6 tests) 11ms
+[refoundhq-antseed-verifier] capability "seller-provider-claims" not offered: seller-provider-claims requires an evidence url and a claims field; not offered
+ ✓ src/prover.test.ts (3 tests) 9ms
+
+ Test Files  11 passed (11)
+      Tests  141 passed (141)
+   Start at  22:29:35
+   Duration  1.31s (transform 485ms, setup 0ms, collect 1.14s, tests 376ms, environment 2ms, prepare 836ms)
+
+exit=0
