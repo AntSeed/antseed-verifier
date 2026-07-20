@@ -2,7 +2,7 @@ import verifierPlugin from './verifier.js'
 import proverPlugin from './prover.js'
 
 /**
- * One package, two halves — both named `refoundhq-antseed-verifier`. The monorepo
+ * One package, two halves — both named `antseed-verifier`. The monorepo
  * plugin loader imports this module and picks the export matching the requested kind:
  *   - type:'verifier' -> the default export (buyer half)
  *   - type:'prover'   -> the `prover` export  (seller half; embedded, not a provider)

@@ -1,7 +1,7 @@
 # Milestone A2 — bind attestation to the traffic path (per-response signing)
 
 **Status:** agreed milestone, not yet implemented. This is the single largest gap
-between `@refoundhq/antseed-verifier` and production-grade confidential-inference
+between `@antseed/antseed-verifier` and production-grade confidential-inference
 verifiers (Tinfoil, NEAR AI, Phala/RedPill).
 
 ## The problem

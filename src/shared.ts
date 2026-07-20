@@ -12,11 +12,11 @@ import { antseedRdV1 } from './report-data.js'
  * The advertised + pinned verifier id (also the seller-side prover's name).
  * Hyphenated — no '@' or '/' — so capability strings satisfy PEER_CAPABILITY_PATTERN.
  */
-export const VERIFIER_ID = 'refoundhq-antseed-verifier'
+export const VERIFIER_ID = 'antseed-verifier'
 
 /**
  * A claim id is the verifier id namespaced by the capability id, e.g.
- * 'refoundhq-antseed-verifier:seller-node-tee-genuine'. One claim per capability.
+ * 'antseed-verifier:seller-node-tee-genuine'. One claim per capability.
  */
 export function claimId(capId: string): string {
   return `${VERIFIER_ID}:${capId}`

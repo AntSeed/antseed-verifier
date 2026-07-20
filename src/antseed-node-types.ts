@@ -12,7 +12,7 @@ export interface AntseedPluginBase {
   description: string
 }
 
-/** One capability's verdict. `claim` is a namespaced id, e.g. 'refoundhq-antseed-verifier:seller-bound'. */
+/** One capability's verdict. `claim` is a namespaced id, e.g. 'antseed-verifier:seller-bound'. */
 export interface ClaimResult {
   claim: string
   ok: boolean

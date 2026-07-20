@@ -52,7 +52,7 @@ afterEach(() => {
 async function attest(caps: string[]): Promise<Record<string, Uint8Array>> {
   const resp = await prover.prove({
     method: 'POST',
-    path: '/_antseed/attest/refoundhq-antseed-verifier',
+    path: '/_antseed/attest/antseed-verifier',
     headers: { 'content-type': 'application/json' },
     body: encodeAttestRequest(NONCE, caps),
   })

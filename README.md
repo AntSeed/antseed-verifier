@@ -1,4 +1,4 @@
-# @refoundhq/antseed-verifier
+# @antseed/antseed-verifier
 
 Reference verifier SDK for AntSeed's pluggable verifier system (AIP-3). It lets a
 buyer cryptographically attest that a seller node runs inside a genuine Intel TDX
@@ -10,13 +10,13 @@ One package, two halves:
   against the seller over the existing buyer-to-seller connection and checks the
   returned Intel TDX quote with DCAP.
 - **prover** (seller side, the `prover` export) is an embedded `type:'prover'`
-  plugin. The seller loads it with `--verifiers refoundhq-antseed-verifier`; the
+  plugin. The seller loads it with `--verifiers antseed-verifier`; the
   node dispatches reserved attestation requests to it before provider matching and
   payment. It is not a provider and stays transparent to the seller's inference
   providers.
 
 It attests a menu of independent **capabilities**, one claim each (namespaced
-`refoundhq-antseed-verifier:<capability>`). The seller produces evidence for the
+`antseed-verifier:<capability>`). The seller produces evidence for the
 capabilities its infrastructure supports; the buyer verifies each:
 
 - **`seller-node-tee-genuine`** — the AntSeed seller NODE's own genuine Intel TDX
@@ -43,7 +43,7 @@ capabilities its infrastructure supports; the buyer verifies each:
   (not yet built). Informational, never required (a CPU-only seller still verifies).
 - **`seller-provider-claims`** — carries the provider's claims into the protocol with
   per-claim granularity: one claim per entry
-  (`refoundhq-antseed-verifier:seller-provider-claims/<name>`), so buyer policy can act on
+  (`antseed-verifier:seller-provider-claims/<name>`), so buyer policy can act on
   individual guarantees. The claims menu is **frozen in the SDK** (`PROVIDER_CLAIMS_MENU`),
   never supplied by the seller or provider and version-pinned through the CLI's trust
   registry, so every buyer runs identical verification; names outside the menu can never
@@ -88,7 +88,7 @@ for the loader, capability advertisement, and buyer policy.
 ## Exports
 
 ```ts
-import verifier, { prover } from '@refoundhq/antseed-verifier'
+import verifier, { prover } from '@antseed/antseed-verifier'
 // verifier: default export, type:'verifier' (buyer half)
 // prover:   named export, type:'prover'   (seller half)
 ```
