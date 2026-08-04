@@ -85,6 +85,9 @@ by `instance_id`, and returns one instance flattened. The buyer then verifies th
 is genuine TDX and bound to this round via `nonce-pubkey-sha256-v1`. Validated against live
 Chutes + real Intel TDX hardware; see `docs/e2e-report-data-schemes.md` for the full flow.
 
+**Full integration guides:** [CHUTES.md](./CHUTES.md) (Chutes provider-only vs. Chutes CPU +
+provider) and [PHALA.md](./PHALA.md) (running the seller in a Phala dstack TDX CVM).
+
 ---
 
 `v0.1.0` · GPL-3.0
