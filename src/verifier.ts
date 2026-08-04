@@ -34,12 +34,25 @@ const MEASURED_IMAGE_ID = 'seller-provider-measured-image'
 const SELLER_BOUND_ID = 'seller-bound'
 
 /**
- * The caps that MUST pass for ok=true. @antseed/node's VerifyContext carries no buyer
- * config yet, so this is a fixed default: the seller NODE's genuine TDX hardware AND the
- * seller-identity binding. The provider TEE, measured-image and gpu are informational
- * (the provider TEE is optional; measured-image needs a buyer policy to pass).
+ * The caps that MUST pass for ok=true. Defaults to the seller NODE's genuine TDX hardware
+ * AND the seller-identity binding (the provider TEE, measured-image and gpu are then
+ * informational). A buyer can override the set via ANTSEED_VERIFIER_REQUIRED_CAPS
+ * (comma-separated cap ids) to gate on a different guarantee — e.g. a provenance-focused
+ * buyer requiring the downstream PROVIDER's TEE: "seller-provider-tee-genuine,seller-bound".
+ * Note: requiring the provider TEE proves genuine, round-bound provider hardware — NOT that
+ * the seller node kept the buyer's data private (a non-TEE seller node still sees plaintext).
  */
-const REQUIRED_CAPS = [NODE_TEE_CAP_ID, SELLER_BOUND_ID]
+const DEFAULT_REQUIRED_CAPS = [NODE_TEE_CAP_ID, SELLER_BOUND_ID]
+
+/**
+ * Buyer's required-cap set. Reads ANTSEED_VERIFIER_REQUIRED_CAPS (comma-separated), else the
+ * default. An unknown/absent required cap simply never has a passing claim, so ok fails closed.
+ */
+export function readRequiredCaps(): string[] {
+  const ids = (process.env['ANTSEED_VERIFIER_REQUIRED_CAPS'] ?? '')
+    .split(',').map((s) => s.trim()).filter(Boolean)
+  return ids.length > 0 ? ids : DEFAULT_REQUIRED_CAPS
+}
 /** The TDX caps whose own evidence is DCAP-verified independently into a per-cap parse. */
 const TDX_CAP_IDS = [NODE_TEE_CAP_ID, PROVIDER_TEE_CAP_ID]
 /** Derived cap (no own evidence): always worth reporting; verifies the provider quote. */
@@ -75,8 +88,8 @@ export function readMeasuredImagePolicy(): MeasuredImagePolicy | undefined {
 }
 
 /** When we can't even get evidence, fail every required cap with the same reason. */
-function failAll(detail: string): VerifyResult {
-  return { ok: false, claims: REQUIRED_CAPS.map((id) => ({ claim: claimId(id), ok: false, detail })) }
+function failAll(detail: string, requiredCaps: string[]): VerifyResult {
+  return { ok: false, claims: requiredCaps.map((id) => ({ claim: claimId(id), ok: false, detail })) }
 }
 
 /** Core orchestration; the DCAP check is injectable for testing. */
@@ -84,11 +97,12 @@ export async function runVerify(
   ctx: VerifyContext,
   verifyQuote: VerifyQuoteFn = defaultVerifyQuote,
 ): Promise<VerifyResult> {
+  const requiredCaps = readRequiredCaps()
   let peerId: string
   try {
     peerId = normalizePeerId(ctx.peerId)
   } catch (err) {
-    return failAll(msg(err))
+    return failAll(msg(err), requiredCaps)
   }
 
   const nonce = randomBytes(NONCE_BYTES)
@@ -104,18 +118,18 @@ export async function runVerify(
       body: encodeAttestRequest(nonce, requested),
     })
   } catch (err) {
-    return failAll(`attestation request failed: ${msg(err)}`)
+    return failAll(`attestation request failed: ${msg(err)}`, requiredCaps)
   }
 
   if (resp.statusCode !== 200) {
-    return failAll(`attestation service returned HTTP ${resp.statusCode}`)
+    return failAll(`attestation service returned HTTP ${resp.statusCode}`, requiredCaps)
   }
 
   let evidence: Record<string, Uint8Array>
   try {
     evidence = decodeAttestResponse(resp.body)
   } catch (err) {
-    return failAll(`malformed attestation response: ${msg(err)}`)
+    return failAll(`malformed attestation response: ${msg(err)}`, requiredCaps)
   }
 
   // DCAP-verify each TDX cap's OWN evidence independently; share each parse with its dependents.
@@ -127,7 +141,7 @@ export async function runVerify(
   }
 
   // Verify the required caps, any cap the seller returned evidence for, and derived caps.
-  const wanted = new Set([...REQUIRED_CAPS, ...Object.keys(evidence), ...DERIVED_CAPS])
+  const wanted = new Set([...requiredCaps, ...Object.keys(evidence), ...DERIVED_CAPS])
   const measuredImagePolicy = readMeasuredImagePolicy()
   const claims: ClaimResult[] = []
   for (const capId of capabilityIds()) {
@@ -145,7 +159,7 @@ export async function runVerify(
     }
   }
 
-  const ok = REQUIRED_CAPS.every((id) => claims.some((c) => c.claim === claimId(id) && c.ok))
+  const ok = requiredCaps.every((id) => claims.some((c) => c.claim === claimId(id) && c.ok))
   return { ok, claims }
 }
 

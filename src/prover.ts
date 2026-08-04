@@ -22,7 +22,8 @@ import {
  * Env config (each provider cap is offered only when the evidence URL AND its field are set,
  * all off the SAME route):
  *   ANTSEED_TEE_PEER_ID                    this node's peer id (EVM address, no 0x) — required
- *   ANTSEED_VERIFIER_NODE_TEE              seller-node-tee-genuine source: "configfs" (default)
+ *   ANTSEED_VERIFIER_NODE_TEE              seller-node-tee-genuine source: "configfs" (default), "dstack", or "http"
+ *   ANTSEED_VERIFIER_DSTACK_SOCKET         override the dstack guest-agent socket path (default /var/run/dstack.sock)
  *   ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL provider evidence route ({nonce} hex placeholder); enables seller-provider-tee-genuine via http
  *   ANTSEED_VERIFIER_PROVIDER_TEE_FIELD    JSON field holding the base64 provider quote (default "quote")
  *   ANTSEED_VERIFIER_PROVIDER_GPU_FIELD    JSON field holding the provider's GPU CC evidence; enables seller-provider-gpu-cc
@@ -35,6 +36,7 @@ import {
 const PEER_ID_KEY = 'ANTSEED_TEE_PEER_ID'
 const SIGNING_KEY = 'ANTSEED_VERIFIER_SIGNING_KEY'
 const NODE_TEE_SOURCE = 'ANTSEED_VERIFIER_NODE_TEE'
+const DSTACK_SOCKET = 'ANTSEED_VERIFIER_DSTACK_SOCKET'
 const PROVIDER_EVIDENCE_URL = 'ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL'
 const PROVIDER_TEE_FIELD = 'ANTSEED_VERIFIER_PROVIDER_TEE_FIELD'
 const PROVIDER_GPU_FIELD = 'ANTSEED_VERIFIER_PROVIDER_GPU_FIELD'
@@ -63,6 +65,9 @@ function baseConfig(): Record<string, string> {
   const cfg: Record<string, string> = {}
   // seller-node-tee-genuine: mint the quote locally; default to configfs when unset.
   cfg[tdxConfigKey(NODE_TEE_CAP_ID, 'source')] = process.env[NODE_TEE_SOURCE]?.trim() || 'configfs'
+  // Optional dstack guest-agent socket override (Phala CVMs); default locations are used when unset.
+  const dstackSocket = process.env[DSTACK_SOCKET]?.trim()
+  if (dstackSocket) cfg[tdxConfigKey(NODE_TEE_CAP_ID, 'dstack.socket')] = dstackSocket
   // seller-provider-tee-genuine: only offered when a provider evidence route is configured.
   const provUrl = process.env[PROVIDER_EVIDENCE_URL]?.trim()
   if (provUrl) {

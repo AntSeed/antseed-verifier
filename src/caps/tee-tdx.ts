@@ -2,6 +2,7 @@ import type { ClaimResult } from '../antseed-node-types.js'
 import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '../capability.js'
 import { claimId, computeReportData } from '../shared.js'
 import { generateTdxQuote } from '../collect/configfs.js'
+import { generateDstackQuote } from '../collect/dstack.js'
 import { collectViaHttp, collectTdxAndPubkey } from '../collect/http.js'
 import { antseedRdV1, verifyReportData, type BindingIngredients } from '../report-data.js'
 
@@ -189,7 +190,9 @@ function hex(b: Uint8Array): string {
 /**
  * Mint one TDX capability. `id` names the target (node vs provider); `defaultSource`
  * is the collector used when config supplies no `<id>.source` override:
- *   'configfs': self-hosted TDX minted locally; report_data = antseed-rd-v1 {peerId} (see report-data.ts)
+ *   'configfs': self-hosted TDX minted locally via configfs-tsm; report_data = antseed-rd-v1 {peerId}
+ *   'dstack'  : self-hosted TDX minted via the dstack guest-agent socket (Phala CVMs, where
+ *               configfs-tsm is absent); same antseed-rd-v1 {peerId} report_data as configfs
  *   'http'    : a pre-made quote fetched from a config-supplied evidence route ({nonce} hex)
  * verify reads this cap's OWN parsed quote (the orchestrator DCAP-verifies each cap's
  * own evidence entry independently). collect throws when its source is unavailable
@@ -239,6 +242,11 @@ export function makeTdxCap(
         const quote = generateTdxQuote(computeReportData(input.nonce, input.peerId))
         return encodeTeeTdxEvidence(quote)
       }
+      if (source === 'dstack') {
+        const socket = input.config[tdxConfigKey(id, 'dstack.socket')] || undefined
+        const quote = await generateDstackQuote(computeReportData(input.nonce, input.peerId), socket)
+        return encodeTeeTdxEvidence(quote)
+      }
       if (source === 'http') {
         const url = input.config[tdxConfigKey(id, 'url')]
         if (!url) throw new Error(`${id} http source requires an evidence url; not offered`)
@@ -255,7 +263,7 @@ export function makeTdxCap(
         const ingredients = pubkey ? { e2ePubkey: pubkey } : {}
         return encodeTeeTdxEvidence(quote, undefined, { scheme, ingredients })
       }
-      throw new Error(`unknown ${id} source "${source}" (expected "configfs" or "http")`)
+      throw new Error(`unknown ${id} source "${source}" (expected "configfs", "dstack", or "http")`)
     },
   }
 }

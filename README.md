@@ -40,7 +40,8 @@ The **prover** (seller) reads its config from the environment, never from buyer-
 |---|---|
 | `ANTSEED_TEE_PEER_ID` | the seller's peer id (EVM address, no `0x`) |
 | `ANTSEED_VERIFIER_SIGNING_KEY` | seller identity key (hex) for `seller-bound`; disabled if its address ≠ peerId |
-| `ANTSEED_VERIFIER_NODE_TEE` | node quote source; defaults to `configfs` |
+| `ANTSEED_VERIFIER_NODE_TEE` | node quote source: `configfs` (default; bare-metal/GCP TDX), `dstack` (Phala & other dstack CVMs), or `http` |
+| `ANTSEED_VERIFIER_DSTACK_SOCKET` | override the dstack guest-agent socket path (default `/var/run/dstack.sock`) |
 | `ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL` | provider evidence route (`{nonce}` → hex nonce); enables the provider caps |
 | `ANTSEED_VERIFIER_PROVIDER_TEE_FIELD` | JSON field with the base64 provider quote (default `quote`) |
 | `ANTSEED_VERIFIER_PROVIDER_GPU_FIELD` | JSON field with per-GPU NVIDIA CC evidence → enables `seller-provider-gpu-cc` |
@@ -52,12 +53,15 @@ The **buyer** needs no special hardware; optional policy knobs:
 
 | Variable | Purpose |
 |---|---|
+| `ANTSEED_VERIFIER_REQUIRED_CAPS` | comma-separated caps that gate the overall `ok` (default `seller-node-tee-genuine,seller-bound`); e.g. a provenance buyer sets `seller-provider-tee-genuine,seller-bound` to require the downstream provider's TEE |
 | `ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY` | approved-measurement allow-list (inline JSON or `@/path.json`) for `measured-image` |
 | `ANTSEED_VERIFIER_STRICT_TCB` | `true` requires TCB exactly `UpToDate` (default also accepts `SWHardeningNeeded`) |
 | `ANTSEED_VERIFIER_NRAS_URL` / `_NRAS_JWKS_URL` | override NVIDIA NRAS endpoints for `gpu-cc` |
 
-`seller-node-tee-genuine` runs only on a real Intel TDX VM and needs root (mints via
-`/sys/kernel/config/tsm/report`).
+`seller-node-tee-genuine` runs only on a real Intel TDX VM. `configfs` mints via
+`/sys/kernel/config/tsm/report` (needs root); `dstack` mints via the guest-agent socket
+(Phala & other dstack CVMs, where configfs-tsm is absent). Both bind the same `antseed-rd-v1`
+report_data, so the buyer verifies them identically.
 
 ## Appendix — using a Chutes provider
 

@@ -22,8 +22,10 @@ export type {
   SellerResponse,
 } from './antseed-node-types.js'
 
-// Self-hosted TDX quote minting (configfs-tsm) — for provider tooling that adopts antseed-rd-v1.
+// Self-hosted TDX quote minting — for provider tooling that adopts antseed-rd-v1.
+// configfs-tsm (bare-metal / GCP TDX) and the dstack guest agent (Phala CVMs).
 export { generateTdxQuote } from './collect/configfs.js'
+export { generateDstackQuote } from './collect/dstack.js'
 
 // Capability model — the menu, its registry, and helpers.
 export type {
@@ -58,8 +60,9 @@ export {
 } from './caps/provider-claims.js'
 export type { ProviderClaimDefinition } from './caps/provider-claims.js'
 
-// Buyer measured-image policy loader (reads the approved-measurement allow-list from env).
-export { readMeasuredImagePolicy } from './verifier.js'
+// Buyer policy loaders (read from env): the measured-image allow-list, and the required-cap
+// set that gates the overall verdict (default node-tee + seller-bound; overridable).
+export { readMeasuredImagePolicy, readRequiredCaps } from './verifier.js'
 
 // Report_data binding schemes — the frozen registry the buyer verifies provider quotes against.
 // antseedRdV1 is our canonical compositional scheme (the node cap is its {peerId} instance);

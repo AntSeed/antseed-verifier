@@ -271,6 +271,47 @@ describe('runVerify — required caps gate ok (all return ok:false, never throw)
   })
 })
 
+describe('runVerify — buyer-configurable required caps (ANTSEED_VERIFIER_REQUIRED_CAPS)', () => {
+  /** A provider-only bundle: genuine provider quote + a seller-bound signature over it (no node tee). */
+  const providerOnly = (nonce: Uint8Array) => (async () => {
+    const bundle = { 'seller-provider-tee-genuine': encodeTeeTdxEvidence(randomBytes(64)) }
+    return ok200(encodeAttestResponse({ ...bundle, 'seller-bound': await signBundle(nonce, bundle) }))
+  })()
+
+  it('enforces provider-tee: passes on provider quote + seller-bound even when the node tee is absent', async () => {
+    const { ctx } = makeCtx((nonce) => providerOnly(nonce))
+    process.env['ANTSEED_VERIFIER_REQUIRED_CAPS'] = 'seller-provider-tee-genuine,seller-bound'
+    try {
+      const r = await runVerify(ctx, okVerify)
+      expect(r.ok).toBe(true)
+      expect(findClaim(r, PROVIDER)?.ok).toBe(true)
+      expect(findClaim(r, BOUND)?.ok).toBe(true)
+    } finally {
+      delete process.env['ANTSEED_VERIFIER_REQUIRED_CAPS']
+    }
+  })
+
+  it('enforces provider-tee: fails closed when the provider quote is absent', async () => {
+    const { ctx } = makeCtx(async (nonce) => ok200(await nodeEvidence(nonce)))
+    process.env['ANTSEED_VERIFIER_REQUIRED_CAPS'] = 'seller-provider-tee-genuine,seller-bound'
+    try {
+      const r = await runVerify(ctx, okVerify)
+      expect(r.ok).toBe(false)
+      expect(findClaim(r, PROVIDER)?.ok).toBe(false)
+      expect(findClaim(r, PROVIDER)?.detail).toMatch(/no TDX quote/)
+    } finally {
+      delete process.env['ANTSEED_VERIFIER_REQUIRED_CAPS']
+    }
+  })
+
+  it('defaults to node-tee + seller-bound when unset: a provider-only bundle fails', async () => {
+    const { ctx } = makeCtx((nonce) => providerOnly(nonce))
+    const r = await runVerify(ctx, okVerify)
+    expect(r.ok).toBe(false)
+    expect(findClaim(r, NODE)?.ok).toBe(false)
+  })
+})
+
 describe('runVerify — transport failures fail every required cap', () => {
   const onlyRequired = (r: { claims: { claim: string }[] }) =>
     r.claims.map((c) => c.claim).sort()
