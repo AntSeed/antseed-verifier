@@ -2,9 +2,10 @@ import type { Prover, SellerRequest, SellerResponse } from './antseed-node-types
 import './caps/index.js' // side-effect: register the capability menu
 import { listCapabilities } from './capability.js'
 import { evmAddressFromPrivateKey, signerFromPrivateKey } from './caps/seller-bound.js'
-import { NODE_TEE_CAP_ID, PROVIDER_TEE_CAP_ID, tdxConfigKey } from './caps/tee-tdx.js'
-import { gpuConfigKey } from './caps/gpu-nvidia.js'
+import { NODE_TEE_CAP_ID, PROVIDER_TEE_CAP_ID, encodeTeeTdxEvidence, tdxConfigKey } from './caps/tee-tdx.js'
+import { GPU_CAP_ID, gpuConfigKey } from './caps/gpu-nvidia.js'
 import { claimsConfigKey } from './caps/provider-claims.js'
+import { loadAdapter } from './adapters/index.js'
 import {
   VERIFIER_ID,
   decodeAttestRequest,
@@ -24,7 +25,8 @@ import {
  *   ANTSEED_TEE_PEER_ID                    this node's peer id (EVM address, no 0x) — required
  *   ANTSEED_VERIFIER_NODE_TEE              seller-node-tee-genuine source: "configfs" (default), "dstack", or "http"
  *   ANTSEED_VERIFIER_DSTACK_SOCKET         override the dstack guest-agent socket path (default /var/run/dstack.sock)
- *   ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL provider evidence route ({nonce} hex placeholder); enables seller-provider-tee-genuine via http
+ *   ANTSEED_VERIFIER_PROVIDER_ADAPTER      in-process provider adapter id (e.g. "chutes", "aci"); fetches provider evidence directly, no separate shim
+ *   ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL provider evidence route ({nonce} hex placeholder); enables seller-provider-tee-genuine via http (alternative to an adapter)
  *   ANTSEED_VERIFIER_PROVIDER_TEE_FIELD    JSON field holding the base64 provider quote (default "quote")
  *   ANTSEED_VERIFIER_PROVIDER_GPU_FIELD    JSON field holding the provider's GPU CC evidence; enables seller-provider-gpu-cc
  *   ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD JSON field holding the provider's base64 claims document; enables seller-provider-claims
@@ -35,6 +37,7 @@ import {
 
 const PEER_ID_KEY = 'ANTSEED_TEE_PEER_ID'
 const SIGNING_KEY = 'ANTSEED_VERIFIER_SIGNING_KEY'
+const PROVIDER_ADAPTER = 'ANTSEED_VERIFIER_PROVIDER_ADAPTER'
 const NODE_TEE_SOURCE = 'ANTSEED_VERIFIER_NODE_TEE'
 const DSTACK_SOCKET = 'ANTSEED_VERIFIER_DSTACK_SOCKET'
 const PROVIDER_EVIDENCE_URL = 'ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL'
@@ -46,6 +49,40 @@ const PROVIDER_BINDING_PUBKEY_FIELD = 'ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * Provider adapter path: when ANTSEED_VERIFIER_PROVIDER_ADAPTER names an adapter, fetch the
+ * provider's evidence in-process (the adapter handles that provider's auth + response shape) and
+ * map it onto the provider caps — instead of the generic http evidence route. The evidence is
+ * also exposed as evidence:<capId> config so seller-bound binds it. A failure omits the provider
+ * caps, exactly like an unconfigured http route.
+ */
+async function collectViaAdapter(
+  nonce: Uint8Array,
+  caps: string[],
+  evidence: Record<string, Uint8Array>,
+  config: Record<string, string>,
+): Promise<void> {
+  const id = process.env[PROVIDER_ADAPTER]?.trim()
+  if (!id) return
+  const put = (capId: string, bytes: Uint8Array): void => {
+    evidence[capId] = bytes
+    config[evidenceConfigKey(capId)] = Buffer.from(bytes).toString('base64')
+  }
+  try {
+    const adapter = await loadAdapter(id)
+    const ev = await adapter.fetchEvidence(nonce, process.env)
+    if (caps.includes(PROVIDER_TEE_CAP_ID)) {
+      const binding = ev.bindingScheme ? { scheme: ev.bindingScheme, ingredients: ev.ingredients ?? {} } : undefined
+      put(PROVIDER_TEE_CAP_ID, encodeTeeTdxEvidence(ev.quote, undefined, binding))
+    }
+    if (ev.gpuEvidence && caps.includes(GPU_CAP_ID)) {
+      put(GPU_CAP_ID, new TextEncoder().encode(JSON.stringify(ev.gpuEvidence)))
+    }
+  } catch (err) {
+    process.stderr.write(`[${VERIFIER_ID}] provider adapter "${id}" not offered: ${msg(err)}\n`)
+  }
 }
 
 function json(statusCode: number, body: unknown): SellerResponse {
@@ -151,9 +188,12 @@ const prover: Prover = {
     const sign = buildSigner(peerId)
 
     const evidence: Record<string, Uint8Array> = {}
+    // A selected provider adapter pre-fills the provider caps in-process, before the collect loop.
+    await collectViaAdapter(nonce, caps, evidence, config)
     // Registry order guarantees a dependency (tee-tdx) is collected before its dependents.
     for (const cap of listCapabilities()) {
       if (!caps.includes(cap.id) || !cap.collect) continue
+      if (evidence[cap.id]) continue // already provided by the adapter
       try {
         const bytes = await cap.collect({ nonce, peerId, config, sign })
         evidence[cap.id] = bytes

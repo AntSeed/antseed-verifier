@@ -42,7 +42,8 @@ The **prover** (seller) reads its config from the environment, never from buyer-
 | `ANTSEED_VERIFIER_SIGNING_KEY` | seller identity key (hex) for `seller-bound`; disabled if its address ≠ peerId |
 | `ANTSEED_VERIFIER_NODE_TEE` | node quote source: `configfs` (default; bare-metal/GCP TDX), `dstack` (Phala & other dstack CVMs), or `http` |
 | `ANTSEED_VERIFIER_DSTACK_SOCKET` | override the dstack guest-agent socket path (default `/var/run/dstack.sock`) |
-| `ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL` | provider evidence route (`{nonce}` → hex nonce); enables the provider caps |
+| `ANTSEED_VERIFIER_PROVIDER_ADAPTER` | in-process provider adapter id (`chutes`, `aci`); fetches provider evidence directly, no shim — see [CHUTES.md](./CHUTES.md) / [REDPILL.md](./REDPILL.md) |
+| `ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL` | generic provider evidence route (`{nonce}` → hex nonce); the manual alternative to an adapter |
 | `ANTSEED_VERIFIER_PROVIDER_TEE_FIELD` | JSON field with the base64 provider quote (default `quote`) |
 | `ANTSEED_VERIFIER_PROVIDER_GPU_FIELD` | JSON field with per-GPU NVIDIA CC evidence → enables `seller-provider-gpu-cc` |
 | `ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD` | JSON field with the base64 claims doc → enables `seller-provider-claims` |
@@ -63,30 +64,22 @@ The **buyer** needs no special hardware; optional policy knobs:
 (Phala & other dstack CVMs, where configfs-tsm is absent). Both bind the same `antseed-rd-v1`
 report_data, so the buyer verifies them identically.
 
-## Appendix — using a Chutes provider
+## Appendix — provider adapters
 
-Point the seller at a [Chutes](https://chutes.ai) chute as the inference provider — config
-only, no code change. Chutes binds its quote with the `nonce-pubkey-sha256-v1` scheme and
-splits the quote and the E2E pubkey across two Bearer-authed endpoints, so run a small shim
-that joins them into one `{quote, e2e_pubkey, gpu_evidence}` response, then:
+A provider whose evidence API doesn't match the generic route (auth, a different response shape)
+is bridged by an **in-process adapter**, selected by `ANTSEED_VERIFIER_PROVIDER_ADAPTER` — no
+separate process. The SDK core stays provider-neutral; each adapter is an isolated, lazily-loaded
+module. Two ship today:
 
 ```bash
-# shim (needs a Chutes API key) → https://api.chutes.ai
-export ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL='http://127.0.0.1:9099/evidence?nonce={nonce}'
-export ANTSEED_VERIFIER_PROVIDER_TEE_FIELD=quote
-export ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME=nonce-pubkey-sha256-v1
-export ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD=e2e_pubkey
-export ANTSEED_VERIFIER_PROVIDER_GPU_FIELD=gpu_evidence   # optional: enable gpu-cc
+export ANTSEED_VERIFIER_PROVIDER_ADAPTER=chutes   # + CHUTES_API_KEY, CHUTES_CHUTE
+export ANTSEED_VERIFIER_PROVIDER_ADAPTER=aci      # + ACI_ATTESTATION_URL (RedPill / dstack ACI)
 ```
 
-The shim fetches `GET /e2e/instances/{chute}` (instances + `e2e_pubkey`) and
-`GET /chutes/{chute}/evidence?nonce={hex}` (per-instance `quote` + `gpu_evidence`), joins them
-by `instance_id`, and returns one instance flattened. The buyer then verifies the Chutes quote
-is genuine TDX and bound to this round via `nonce-pubkey-sha256-v1`. Validated against live
-Chutes + real Intel TDX hardware; see `docs/e2e-report-data-schemes.md` for the full flow.
-
-**Full integration guides:** [CHUTES.md](./CHUTES.md) (Chutes provider-only vs. Chutes CPU +
-provider) and [PHALA.md](./PHALA.md) (running the seller in a Phala dstack TDX CVM).
+The adapter fetches the provider's fresh, nonce-bound quote and declares its frozen `report_data`
+scheme (`nonce-pubkey-sha256-v1` for Chutes, `aci-keyset-v1` for ACI), which the buyer verifies
+unchanged. Full setup: [CHUTES.md](./CHUTES.md) · [REDPILL.md](./REDPILL.md) · [PHALA.md](./PHALA.md)
+(running the seller node in a dstack TDX CVM).
 
 ---
 

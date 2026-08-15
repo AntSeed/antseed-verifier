@@ -3,6 +3,8 @@ import type { ClaimResult } from '../antseed-node-types.js'
 import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '../capability.js'
 import { claimId } from '../shared.js'
 import { collectJsonFieldViaHttp } from '../collect/http.js'
+import { decodeTeeTdxEvidence, PROVIDER_TEE_CAP_ID } from './tee-tdx.js'
+import { getReportDataScheme } from '../report-data.js'
 import {
   NRAS_GPU_ATTEST_URL_DEFAULT,
   NRAS_JWKS_URL_DEFAULT,
@@ -26,7 +28,7 @@ import {
  * check goes through an injectable GpuVerifyFn (see below) so a future offline verifier drops in.
  */
 
-const CAP_ID = 'seller-provider-gpu-cc'
+export const GPU_CAP_ID = 'seller-provider-gpu-cc'
 
 /** Reserved mode switch: 'nras' (default, verify via NRAS) | 'local' (offline; not yet built). */
 const GPU_MODE_ENV = 'ANTSEED_VERIFIER_GPU_MODE'
@@ -124,11 +126,31 @@ export const defaultGpuVerify: GpuVerifyFn = (evidence, nonce) => {
 
 /** Config-key convention for this cap's collector settings (mirrors tee-tdx's tdxConfigKey). */
 export function gpuConfigKey(key: string): string {
-  return `${CAP_ID}.${key}`
+  return `${GPU_CAP_ID}.${key}`
 }
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * The nonce to submit to NRAS this round. A provider that binds its TDX quote with a report_data
+ * scheme (e.g. Chutes' nonce-pubkey-sha256-v1) also binds its GPU evidence to that scheme's DERIVED
+ * nonce, not the raw round nonce — so we ask the declared scheme for it. Absent a scheme, the raw
+ * nonce. Read from the already-collected provider quote in the bundle; any decode issue falls back
+ * to the raw nonce (fail-open here is safe — verifyEar still enforces the eat_nonce match).
+ */
+function nrasNonceFor(nonce: Uint8Array, bundle: Record<string, Uint8Array> | undefined): Uint8Array {
+  const providerEvidence = bundle?.[PROVIDER_TEE_CAP_ID]
+  if (!providerEvidence) return nonce
+  try {
+    const { binding } = decodeTeeTdxEvidence(providerEvidence)
+    if (!binding) return nonce
+    const scheme = getReportDataScheme(binding.scheme)
+    return scheme ? scheme.gpuNonce(nonce, binding.ingredients) : nonce
+  } catch {
+    return nonce
+  }
 }
 
 /**
@@ -139,13 +161,13 @@ function msg(err: unknown): string {
  */
 export function makeGpuNvidiaCap(gpuVerify: GpuVerifyFn = defaultGpuVerify): Capability {
   return {
-    id: CAP_ID,
+    id: GPU_CAP_ID,
 
     async verify(input: CapabilityVerifyInput): Promise<ClaimResult> {
-      const claim = claimId(CAP_ID)
+      const claim = claimId(GPU_CAP_ID)
       // Fail-closed: no evidence means we cannot attest the GPUs.
       if (!input.evidence) return { claim, ok: false, detail: 'seller returned no GPU CC evidence' }
-      const r = await gpuVerify(input.evidence, input.nonce)
+      const r = await gpuVerify(input.evidence, nrasNonceFor(input.nonce, input.evidenceBundle))
       // ClaimResult has no transient field; surface retryability in the human-readable detail.
       const detail = r.transient ? `[transient] ${r.detail}` : r.detail
       return { claim, ok: r.ok, detail }

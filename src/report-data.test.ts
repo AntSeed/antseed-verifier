@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import {
   antseedRdV1,
   noncePubkeySha256V1,
+  aciKeysetV1,
   getReportDataScheme,
   verifyReportData,
   type BindingIngredients,
@@ -11,6 +12,7 @@ import {
 const NONCE = randomBytes(32)
 const PEER = 'ab'.repeat(20)
 const PUBKEY = Buffer.from(randomBytes(32)).toString('base64')
+const KEYSET_DIGEST = createHash('sha256').update('keyset').digest('hex')
 
 describe('antseed-rd-v1 (compositional)', () => {
   it('is 64 bytes, deterministic, and always binds the nonce', () => {
@@ -72,6 +74,24 @@ describe('nonce-pubkey-sha256-v1 (foreign / Chutes)', () => {
   })
 })
 
+describe('aci-keyset-v1 (foreign / RedPill ACI)', () => {
+  it('is keysetDigest(32) ‖ raw nonce(32)', () => {
+    const rd = aciKeysetV1.build(NONCE, { keysetDigest: KEYSET_DIGEST })
+    expect(rd.length).toBe(64)
+    expect(Buffer.from(rd.subarray(0, 32)).equals(Buffer.from(KEYSET_DIGEST, 'hex'))).toBe(true)
+    expect(Buffer.from(rd.subarray(32)).equals(Buffer.from(NONCE))).toBe(true)
+  })
+
+  it('requires a 32-byte keysetDigest', () => {
+    expect(() => aciKeysetV1.build(NONCE, { peerId: PEER })).toThrow(/requires keysetDigest/)
+    expect(() => aciKeysetV1.build(NONCE, { keysetDigest: 'ab' })).toThrow(/32 bytes/)
+  })
+
+  it('the GPU nonce is the raw round nonce', () => {
+    expect(Buffer.from(aciKeysetV1.gpuNonce(NONCE, { keysetDigest: KEYSET_DIGEST })).equals(NONCE)).toBe(true)
+  })
+})
+
 describe('verifyReportData', () => {
   const rd = (scheme: { build: (n: Uint8Array, i: BindingIngredients) => Uint8Array }, i: BindingIngredients) =>
     scheme.build(NONCE, i)
@@ -79,6 +99,14 @@ describe('verifyReportData', () => {
   it('matches when the quote committed the same scheme + ingredients + nonce', () => {
     expect(verifyReportData('antseed-rd-v1', rd(antseedRdV1, { peerId: PEER }), NONCE, { peerId: PEER })).toBeNull()
     expect(verifyReportData('nonce-pubkey-sha256-v1', rd(noncePubkeySha256V1, { e2ePubkey: PUBKEY }), NONCE, { e2ePubkey: PUBKEY })).toBeNull()
+    expect(verifyReportData('aci-keyset-v1', rd(aciKeysetV1, { keysetDigest: KEYSET_DIGEST }), NONCE, { keysetDigest: KEYSET_DIGEST })).toBeNull()
+  })
+
+  it('aci-keyset-v1 fails on a stale nonce and on a swapped keyset digest', () => {
+    const quote = rd(aciKeysetV1, { keysetDigest: KEYSET_DIGEST })
+    expect(verifyReportData('aci-keyset-v1', quote, randomBytes(32), { keysetDigest: KEYSET_DIGEST })).toMatch(/does not match/)
+    const other = createHash('sha256').update('other').digest('hex')
+    expect(verifyReportData('aci-keyset-v1', quote, NONCE, { keysetDigest: other })).toMatch(/does not match/)
   })
 
   it('compares only compareLen bytes (Chutes leaves [32:64] to the provider)', () => {

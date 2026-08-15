@@ -70,11 +70,18 @@ export { readMeasuredImagePolicy, readRequiredCaps } from './verifier.js'
 export {
   antseedRdV1,
   noncePubkeySha256V1,
+  aciKeysetV1,
   getReportDataScheme,
   verifyReportData,
   REPORT_DATA_SCHEMES,
 } from './report-data.js'
 export type { ReportDataScheme, BindingIngredients } from './report-data.js'
+
+// In-process provider adapters — bridge a foreign provider's evidence API to the SDK's neutral
+// shape, selected by ANTSEED_VERIFIER_PROVIDER_ADAPTER. The core stays provider-agnostic; each
+// adapter is an isolated, lazily-loaded module (chutes, aci).
+export { loadAdapter, adapterIds } from './adapters/index.js'
+export type { ProviderAdapter, ProviderEvidence } from './adapters/index.js'
 export type { ReportDataBinding } from './caps/tee-tdx.js'
 
 // Buyer-side orchestration + the injectable DCAP seam (useful for tooling/tests).

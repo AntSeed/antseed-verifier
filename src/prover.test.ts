@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import prover from './prover.js'
 import { decodeAttestResponse, encodeAttestRequest } from './shared.js'
 import { PROVIDER_CLAIMS_CAP_ID } from './caps/provider-claims.js'
+import { decodeTeeTdxEvidence } from './caps/tee-tdx.js'
 
 /**
  * Seller-side opt-in semantics: the prover offers ONLY the capabilities that are (a)
@@ -24,6 +25,9 @@ const ENV_KEYS = [
   'ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL',
   'ANTSEED_VERIFIER_PROVIDER_TEE_FIELD',
   'ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD',
+  'ANTSEED_VERIFIER_PROVIDER_ADAPTER',
+  'CHUTES_API_KEY',
+  'CHUTES_CHUTE',
 ] as const
 let saved: Record<string, string | undefined>
 
@@ -79,5 +83,33 @@ describe('prover — provider-claims opt-in', () => {
     process.env['ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD'] = 'claims_doc'
     const evidence = await attest([PROVIDER_TEE])
     expect(evidence[PROVIDER_CLAIMS_CAP_ID]).toBeUndefined()
+  })
+})
+
+describe('prover — in-process provider adapter', () => {
+  it('chutes adapter fetches provider evidence in-process and binds it under seller-provider-tee-genuine', async () => {
+    delete process.env['ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL'] // adapter path only
+    process.env['ANTSEED_VERIFIER_PROVIDER_ADAPTER'] = 'chutes'
+    process.env['CHUTES_API_KEY'] = 'k'
+    process.env['CHUTES_CHUTE'] = 'mychute'
+    const quoteBytes = randomBytes(64)
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ([{ quote: Buffer.from(quoteBytes).toString('base64'), e2e_pubkey: 'cHVia2V5' }]),
+    })))
+    const evidence = await attest([PROVIDER_TEE])
+    expect(evidence[PROVIDER_TEE]).toBeDefined()
+    const { quote, binding } = decodeTeeTdxEvidence(evidence[PROVIDER_TEE]!)
+    expect(Buffer.from(quote).equals(quoteBytes)).toBe(true)
+    expect(binding?.scheme).toBe('nonce-pubkey-sha256-v1')
+    expect(binding?.ingredients.e2ePubkey).toBe('cHVia2V5')
+  })
+
+  it('unknown adapter id omits the provider caps (not a hard failure)', async () => {
+    delete process.env['ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL']
+    process.env['ANTSEED_VERIFIER_PROVIDER_ADAPTER'] = 'nope'
+    const evidence = await attest([PROVIDER_TEE])
+    expect(evidence[PROVIDER_TEE]).toBeUndefined()
   })
 })

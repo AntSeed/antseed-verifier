@@ -9,7 +9,7 @@ import { antseedRdV1, verifyReportData, type BindingIngredients } from '../repor
 /** A provider quote's declared report_data binding: a frozen scheme id + its string ingredients. */
 export interface ReportDataBinding {
   scheme: string
-  ingredients: Pick<BindingIngredients, 'peerId' | 'e2ePubkey'>
+  ingredients: Pick<BindingIngredients, 'peerId' | 'e2ePubkey' | 'keysetDigest'>
 }
 
 /**

@@ -9,7 +9,6 @@
   },
   "files": [
     "dist",
-    "adapters",
     "LICENSE"
   ],
   "main": "dist/index.js",

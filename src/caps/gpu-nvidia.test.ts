@@ -11,6 +11,8 @@ import {
 } from './gpu-nvidia.js'
 import type { NrasRequest, NvidiaGpuEvidence } from '../nras.js'
 import { claimId } from '../shared.js'
+import { encodeTeeTdxEvidence, PROVIDER_TEE_CAP_ID } from './tee-tdx.js'
+import { noncePubkeySha256V1 } from '../report-data.js'
 
 const CLAIM = claimId('seller-provider-gpu-cc')
 const NONCE = randomBytes(32)
@@ -58,6 +60,31 @@ describe('seller-provider-gpu-cc cap (injected GpuVerifyFn)', () => {
     const r = await verifyWith(stub)
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/^\[transient\]/)
+  })
+})
+
+describe('NRAS nonce derives from the provider quote binding', () => {
+  it('submits the derived gpuNonce when the provider quote declares a scheme (Chutes)', async () => {
+    const pubkey = Buffer.from(randomBytes(32)).toString('base64')
+    const providerEv = encodeTeeTdxEvidence(new Uint8Array(randomBytes(64)), undefined, {
+      scheme: 'nonce-pubkey-sha256-v1', ingredients: { e2ePubkey: pubkey },
+    })
+    let seen: Uint8Array | undefined
+    const stub: GpuVerifyFn = async (_ev, nonce) => { seen = nonce; return { ok: true, detail: 'ok' } }
+    await makeGpuNvidiaCap(stub).verify({
+      nonce: NONCE, peerId: 'a'.repeat(40), evidence: EVIDENCE,
+      evidenceBundle: { [PROVIDER_TEE_CAP_ID]: providerEv },
+    })
+    const derived = noncePubkeySha256V1.gpuNonce(NONCE, { e2ePubkey: pubkey })
+    expect(seen && Buffer.from(seen).equals(Buffer.from(derived))).toBe(true)
+    expect(seen && Buffer.from(seen).equals(Buffer.from(NONCE))).toBe(false)
+  })
+
+  it('submits the raw round nonce when no provider binding scheme is present', async () => {
+    let seen: Uint8Array | undefined
+    const stub: GpuVerifyFn = async (_ev, nonce) => { seen = nonce; return { ok: true, detail: 'ok' } }
+    await makeGpuNvidiaCap(stub).verify({ nonce: NONCE, peerId: 'a'.repeat(40), evidence: EVIDENCE })
+    expect(seen && Buffer.from(seen).equals(Buffer.from(NONCE))).toBe(true)
   })
 })
 

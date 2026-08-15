@@ -25,6 +25,8 @@ export interface BindingIngredients {
   peerId?: string
   /** base64 TEE-generated public key — E2E / signing providers. */
   e2ePubkey?: string
+  /** 32-byte (hex) digest of a provider's attested workload keyset — the ACI ingredient. */
+  keysetDigest?: string
 }
 
 export interface ReportDataScheme {
@@ -98,9 +100,31 @@ export const noncePubkeySha256V1: ReportDataScheme = {
   },
 }
 
+export const aciKeysetV1: ReportDataScheme = {
+  id: 'aci-keyset-v1',
+  compareLen: 64,
+  build(nonce, ing) {
+    // ACI (dstack) binds report_data = commitment(32) ‖ raw nonce(32); here the commitment is
+    // the SHA-256 digest of the attested workload keyset. Verified from private-ai-gateway's
+    // report.ts (computeReportData(digest, nonce)) + soundness_report_data.py.
+    if (!ing.keysetDigest) throw new Error(`${this.id} requires keysetDigest`)
+    const digest = Buffer.from(ing.keysetDigest, 'hex')
+    if (digest.length !== 32) throw new Error(`${this.id} keysetDigest must be 32 bytes (got ${digest.length})`)
+    if (nonce.length !== 32) throw new Error(`${this.id} requires a 32-byte nonce`)
+    const rd = Buffer.alloc(64)
+    digest.copy(rd, 0)
+    Buffer.from(nonce).copy(rd, 32)
+    return new Uint8Array(rd)
+  },
+  gpuNonce(nonce) {
+    return nonce // ACI treats GPU CC as supplemental; bind the raw round nonce
+  },
+}
+
 export const REPORT_DATA_SCHEMES: Record<string, ReportDataScheme> = {
   [antseedRdV1.id]: antseedRdV1,
   [noncePubkeySha256V1.id]: noncePubkeySha256V1,
+  [aciKeysetV1.id]: aciKeysetV1,
 }
 
 export function getReportDataScheme(id: string): ReportDataScheme | undefined {
