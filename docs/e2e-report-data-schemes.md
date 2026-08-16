@@ -1,4 +1,4 @@
-# E2E: report_data schemes — standard flow and Chutes-provider flow
+# E2E report_data schemes: standard flow and Chutes-provider flow
 
 Both flows use ONE test seller node (a GCP `c3` Intel TDX VM) and ONE buyer. They differ
 only in the **provider**. The standard flow uses a provider stand-in that mints the canonical
@@ -7,15 +7,15 @@ the foreign `nonce-pubkey-sha256-v1` binding. Nothing in the SDK is provider-spe
 only difference is config.
 
 What's verified where:
-- `seller-node-tee-genuine` — the seller node's own configfs quote, bound with
+- `seller-node-tee-genuine`: the seller node's own configfs quote, bound with
   **`antseed-rd-v1` `{peerId}`** (validated on real TDX hardware: the configfs quote's
   report_data equals `antseedRdV1.build(nonce, {peerId})`, DCAP `UpToDate`).
-- `seller-bound` — the seller signs the bundle; the buyer recovers peerId.
-- `seller-provider-tee-genuine` — the provider quote, verified against its **declared frozen
+- `seller-bound`: the seller signs the bundle. The buyer recovers peerId.
+- `seller-provider-tee-genuine`: the provider quote, verified against its **declared frozen
   scheme** (`antseed-rd-v1` for the stand-in, `nonce-pubkey-sha256-v1` for Chutes). The
   machinery is `src/report-data.ts` and the provider capability binding check.
-- `seller-provider-measured-image` — MRTD/RTMR vs a buyer allow-list (env policy, A5).
-- `seller-provider-gpu-cc` — NRAS; see the GPU caveat under the Chutes flow.
+- `seller-provider-measured-image`: MRTD/RTMR vs a buyer allow-list (env policy, A5).
+- `seller-provider-gpu-cc`: NRAS. See the GPU caveat under the Chutes flow.
 
 Provision and stage the seller and buyer the usual way (a c3 Intel TDX VM, `npm pack` the SDK into
 the seller's `~/.antseed/plugins`, run the seller as root so `configfs` quote minting works).
@@ -23,14 +23,14 @@ This document covers only the provider wiring.
 
 ---
 
-## Standard flow — provider stand-in minting `antseed-rd-v1`
+## Standard flow: provider stand-in minting `antseed-rd-v1`
 
 A small provider generates a key inside the (same) TDX VM. It mints a quote bound to
 `antseed-rd-v1 {e2ePubkey}`. It serves `{quote, e2e_pubkey}`. Run it on the seller VM
 (`:9000`). It imports the SDK's own exports so the bytes match the buyer's recompute exactly:
 
 ```js
-// provider-standin.mjs  — run with:  sudo node provider-standin.mjs   (configfs needs root)
+// provider-standin.mjs  (run with:  sudo node provider-standin.mjs   -- configfs needs root)
 import { createServer } from 'node:http'
 import { generateKeyPairSync } from 'node:crypto'
 import { antseedRdV1, generateTdxQuote } from '@antseed/antseed-verifier'
@@ -60,18 +60,18 @@ export ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD=e2e_pubkey       # NEW: th
 
 Run the buyer (`--require-verifier --verifiers antseed-verifier --peer <SELLER_PEER_ID>`).
 Expected verdict:
-- `seller-node-tee-genuine` PASS — the antseed-rd-v1 `{peerId}` binding matches this round.
+- `seller-node-tee-genuine` PASS. The antseed-rd-v1 `{peerId}` binding matches this round.
 - `seller-bound` PASS.
-- `seller-provider-tee-genuine` PASS — the provider quote's report_data equals
+- `seller-provider-tee-genuine` PASS. The provider quote's report_data equals
   `antseed-rd-v1 {e2ePubkey}` for this nonce. Flip one byte of the stand-in's pubkey and it
   must fail with `report_data does not match scheme "antseed-rd-v1"`.
 
 ---
 
-## Chutes flow — a live Chutes chute as the provider
+## Chutes flow: a live Chutes chute as the provider
 
 The Chutes evidence endpoint is Bearer-authed. It returns an **array** of instances. It binds
-`report_data[0:32] = SHA-256(nonce_hex ‖ e2e_pubkey_b64)` — the frozen
+`report_data[0:32] = SHA-256(nonce_hex ‖ e2e_pubkey_b64)`, the frozen
 `nonce-pubkey-sha256-v1` scheme (verified from the `chutes-api` docs and code). A small local
 shim handles two prerequisites that the SDK does not do itself (no SDK change, no Chutes code):
 
@@ -82,7 +82,7 @@ shim handles two prerequisites that the SDK does not do itself (no SDK change, n
    about 20 lines of Node.
 2. **GPU nonce (only if you test gpu-cc).** See the caveat below. It needs one probe first.
 
-Seller env (identical shape to the standard flow — only the scheme id and URL differ):
+Seller env (identical shape to the standard flow, only the scheme id and URL differ):
 
 ```bash
 export ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL='http://127.0.0.1:9000/evidence?nonce={nonce}'  # local shim → Chutes
@@ -92,12 +92,12 @@ export ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD=e2e_pubkey
 ```
 
 Run the buyer as before. Expected:
-- `seller-node-tee-genuine`, `seller-bound` PASS (unchanged — this is the seller node).
-- `seller-provider-tee-genuine` PASS — the **Chutes** quote's report_data equals
+- `seller-node-tee-genuine`, `seller-bound` PASS (unchanged, this is the seller node).
+- `seller-provider-tee-genuine` PASS. The **Chutes** quote's report_data equals
   `SHA-256(nonce_hex ‖ e2e_pubkey_b64)` for this round. This proves, in a generic way, that the
   Chutes instance minted a fresh quote for the nonce and that its E2E pubkey is enclave-born.
-- `seller-provider-measured-image` — set `ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY` to the Chutes
-  published reference measurements to PASS; otherwise it reports "no approved measurement set".
+- `seller-provider-measured-image`: set `ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY` to the Chutes
+  published reference measurements to PASS. Otherwise it reports "no approved measurement set".
 
 The seller config is byte-for-byte the standard flow except `BINDING_SCHEME` and the URL.
 This is the point: you swap providers with config only. Each provider's binding is a frozen
@@ -125,10 +125,10 @@ Both tasks are small. The nonce derivation itself is proven.
 - **Unit (141 tests):** the `report-data.ts` schemes, node convergence to
   `antseed-rd-v1 {peerId}`, and the provider capability's scheme-binding check (pass and fail-closed).
 - **Live Chutes (`Qwen/Qwen3-32B-TEE`), through the real SDK code path:** a fetched provider quote
-  DCAP-verifies `UpToDate` (genuine TD10, debug off); its `report_data[0:32]` matches
-  `nonce-pubkey-sha256-v1` for a buyer-chosen nonce (5/5 joined instances); and the
+  DCAP-verifies `UpToDate` (genuine TD10, debug off). Its `report_data[0:32]` matches
+  `nonce-pubkey-sha256-v1` for a buyer-chosen nonce (5/5 joined instances). The
   `seller-provider-tee-genuine` capability returns `ok: true, "bound to this round"` through the
-  actual collector, `verifyTdxEvidence`, and provider-capability path. GPUs are Blackwell in CC mode;
-  the derived GPU nonce verifies at NRAS (`overall-att-result: true`).
+  actual collector, `verifyTdxEvidence`, and provider-capability path. GPUs are Blackwell in CC mode.
+  The derived GPU nonce verifies at NRAS (`overall-att-result: true`).
 - **Hardware (GCP TDX):** the node configfs quote's report_data equals the computed bytes and
   DCAP-verifies.

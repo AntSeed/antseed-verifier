@@ -11,4 +11,4 @@ export ANTSEED_VERIFIER_NODE_TEE=dstack
 
 Start the seller with `--verifiers antseed-verifier`. Buyers attest with `--require-verifier`.
 
-Ports: public host ports must equal container ports — signaling (TCP) and DHT (UDP).
+Ports: public host ports must equal container ports, for signaling (TCP) and DHT (UDP).

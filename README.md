@@ -22,12 +22,12 @@ no provider-specific hosts or schemas, and it is self-contained (no peer depende
 
 | Capability | Proves | Verdict |
 |---|---|---|
-| `seller-node-tee-genuine` | the seller **node** runs in a genuine Intel TDX enclave (DCAP: PCK chain to Intel's root, acceptable TCB, TD10, debug off); the quote binds to this nonce + peerId | **required** |
+| `seller-node-tee-genuine` | the seller **node** runs in a genuine Intel TDX enclave (DCAP: PCK chain to Intel's root, acceptable TCB, TD10, debug off). The quote binds to this nonce + peerId | **required** |
 | `seller-bound` | the seller's identity key signs the whole evidence bundle for this fresh nonce (the signer recovers to peerId) | **required** |
-| `seller-provider-tee-genuine` | the downstream inference **provider's** TEE is genuine TDX; also round-bound when the seller declares a `report_data` scheme | informational |
+| `seller-provider-tee-genuine` | the downstream inference **provider's** TEE is genuine TDX. It is also round-bound when the seller declares a `report_data` scheme | informational |
 | `seller-provider-gpu-cc` | the provider's GPUs run NVIDIA Confidential Computing (NVIDIA NRAS verifies it, nonce-bound) | informational |
 | `seller-provider-measured-image` | the provider quote's MRTD/RTMR match a buyer allow-list | informational |
-| `seller-provider-claims` | named provider claims against a frozen SDK menu; each claim is `asserted` (self-vouched) or `tdx-quote` (TEE-attested) | informational |
+| `seller-provider-claims` | named provider claims against a frozen SDK menu. Each claim is `asserted` (self-vouched) or `tdx-quote` (TEE-attested) | informational |
 
 The two required capabilities together prove one thing: *a genuine Intel TDX seller node,
 minted fresh this round and cryptographically tied to the seller's marketplace identity.*
@@ -39,11 +39,11 @@ The **prover** (seller) reads its config from the environment, never from buyer-
 | Variable | Purpose |
 |---|---|
 | `ANTSEED_TEE_PEER_ID` | the seller's peer id (EVM address, no `0x`) |
-| `ANTSEED_VERIFIER_SIGNING_KEY` | seller identity key (hex) for `seller-bound`; disabled if its address ≠ peerId |
-| `ANTSEED_VERIFIER_NODE_TEE` | node quote source: `configfs` (default; bare-metal/GCP TDX), `dstack` (Phala & other dstack CVMs), or `http` |
+| `ANTSEED_VERIFIER_SIGNING_KEY` | seller identity key (hex) for `seller-bound`. Disabled if its address ≠ peerId |
+| `ANTSEED_VERIFIER_NODE_TEE` | node quote source: `configfs` (default, bare-metal/GCP TDX), `dstack` (Phala and other dstack CVMs), or `http` |
 | `ANTSEED_VERIFIER_DSTACK_SOCKET` | override the dstack guest-agent socket path (default `/var/run/dstack.sock`) |
-| `ANTSEED_VERIFIER_PROVIDER_ADAPTER` | in-process provider adapter id (`chutes`, `aci`); fetches provider evidence directly, no shim — see [CHUTES.md](./CHUTES.md) / [REDPILL.md](./REDPILL.md) |
-| `ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL` | generic provider evidence route (`{nonce}` → hex nonce); the manual alternative to an adapter |
+| `ANTSEED_VERIFIER_PROVIDER_ADAPTER` | in-process provider adapter id (`chutes`, `aci`). It fetches provider evidence directly, no shim. See [CHUTES.md](./CHUTES.md) or [REDPILL.md](./REDPILL.md) |
+| `ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL` | generic provider evidence route (`{nonce}` → hex nonce). The manual alternative to an adapter |
 | `ANTSEED_VERIFIER_PROVIDER_TEE_FIELD` | JSON field with the base64 provider quote (default `quote`) |
 | `ANTSEED_VERIFIER_PROVIDER_GPU_FIELD` | JSON field with per-GPU NVIDIA CC evidence → enables `seller-provider-gpu-cc` |
 | `ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD` | JSON field with the base64 claims doc → enables `seller-provider-claims` |
@@ -54,17 +54,17 @@ The **buyer** needs no special hardware. Optional policy knobs:
 
 | Variable | Purpose |
 |---|---|
-| `ANTSEED_VERIFIER_REQUIRED_CAPS` | comma-separated capabilities that gate the overall `ok` (default `seller-node-tee-genuine,seller-bound`); for example, a provenance buyer sets `seller-provider-tee-genuine,seller-bound` to require the downstream provider's TEE |
+| `ANTSEED_VERIFIER_REQUIRED_CAPS` | comma-separated capabilities that gate the overall `ok` (default `seller-node-tee-genuine,seller-bound`). For example, a provenance buyer sets `seller-provider-tee-genuine,seller-bound` to require the downstream provider's TEE |
 | `ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY` | approved-measurement allow-list (inline JSON or `@/path.json`) for `measured-image` |
 | `ANTSEED_VERIFIER_STRICT_TCB` | `true` requires TCB exactly `UpToDate` (default also accepts `SWHardeningNeeded`) |
 | `ANTSEED_VERIFIER_NRAS_URL` / `_NRAS_JWKS_URL` | override NVIDIA NRAS endpoints for `gpu-cc` |
 
 `seller-node-tee-genuine` runs only on a real Intel TDX VM. `configfs` mints via
-`/sys/kernel/config/tsm/report` (needs root); `dstack` mints via the guest-agent socket
-(Phala & other dstack CVMs, where configfs-tsm is absent). Both bind the same `antseed-rd-v1`
+`/sys/kernel/config/tsm/report` (needs root). `dstack` mints via the guest-agent socket
+(Phala and other dstack CVMs, where configfs-tsm is absent). Both bind the same `antseed-rd-v1`
 report_data, so the buyer verifies them identically.
 
-## Appendix — provider adapters
+## Appendix: provider adapters
 
 An **in-process adapter** bridges a provider whose evidence API does not match the generic route
 (auth, a different response shape). Select the adapter with `ANTSEED_VERIFIER_PROVIDER_ADAPTER`.
