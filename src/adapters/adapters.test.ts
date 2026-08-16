@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { randomBytes } from 'node:crypto'
 import { loadAdapter, adapterIds } from './index.js'
 
-/** Start a stub provider HTTP server; returns its base URL + a handle to close it. */
+/** Start a stub provider HTTP server. Return its base URL and a handle to close it. */
 async function startStub(handler: (url: URL, auth: string | undefined) => { status: number; body: unknown } | null): Promise<{ base: string; server: Server }> {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')

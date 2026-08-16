@@ -4,12 +4,12 @@ import type { ParsedTdxQuote } from './tee-tdx.js'
 import { claimId } from '../shared.js'
 
 /**
- * Capability 'seller-provider-measured-image': proves the inference PROVIDER booted a
- * specific, approved software image, by comparing the provider TDX quote's authenticated
+ * Capability 'seller-provider-measured-image': proves the inference provider booted a
+ * specific, approved software image. It compares the provider TDX quote's authenticated
  * measurements (MRTD + RTMR0-3) to a buyer-supplied allow-list. The approved measurements
- * are pure DATA passed in via policy — never fetched, never hardcoded — so the SDK stays
- * provider-agnostic. With no policy it returns ok:false; it never passes by default.
- * Derives from the provider quote, so it has no own evidence.
+ * are pure data passed in via policy — never fetched, never hardcoded — so the SDK stays
+ * provider-agnostic. With no policy it returns ok:false; it never passes by default. It
+ * derives from the provider quote, so it has no own evidence.
  */
 
 const CAP_ID = 'seller-provider-measured-image'
@@ -60,8 +60,8 @@ export const measuredImageCapability: Capability = {
     if (!approved.some((m) => matches(m, p.td))) {
       return { claim, ok: false, detail: `MRTD ${hex(p.td.mrTd).slice(0, 16)}… matches no approved measurement` }
     }
-    // A matching measurement on its own says nothing about freshness: without a report_data
-    // scheme binding this quote to the round, it could be a genuine but replayed/borrowed quote.
+    // A matching measurement alone says nothing about freshness. Without a report_data scheme
+    // that binds this quote to the round, it could be a genuine but replayed or borrowed quote.
     const caveat = p.binding ? '' : ' (freshness/instance binding NOT verified — no report_data scheme declared)'
     return { claim, ok: true, detail: `measurements match an approved image (MRTD ${hex(p.td.mrTd).slice(0, 16)}…)${caveat}` }
   },

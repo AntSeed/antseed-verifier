@@ -8,7 +8,7 @@ import {
 } from './seller-bound.js'
 import { bundleDigest, claimId, evidenceConfigKey, sellerBoundPreimage } from '../shared.js'
 
-// Fixed test keypairs (valid secp256k1 scalars, < curve order, != 0).
+// Fixed test key pairs: valid secp256k1 scalars, less than the curve order, not zero.
 const PRIV = '01'.repeat(32)
 const PRIV2 = '02'.repeat(32)
 const PEER = evmAddressFromPrivateKey(PRIV)
@@ -55,7 +55,7 @@ describe('seller-bound capability (whole-bundle binding)', () => {
     const nonce = randomBytes(32)
     const bundle = { [NODE]: randomBytes(100), [PROVIDER]: randomBytes(80) }
     const sig = await collect(PEER, bundle, nonce)
-    // Independently recover against the canonical preimage — must yield the seller's address.
+    // Recover against the canonical preimage. This must yield the seller address.
     expect(recoverEvmAddress(sellerBoundPreimage(nonce, bundleDigest(bundle), PEER), sig)).toBe(PEER)
   })
 
@@ -76,7 +76,7 @@ describe('seller-bound capability (whole-bundle binding)', () => {
     const nonce = randomBytes(32)
     const bundle = { [NODE]: randomBytes(100) }
     const sig = await collect(PEER, bundle, nonce)
-    const r = verify(randomBytes(32), sig, bundle) // a fresh round's nonce; the old signature is stale
+    const r = verify(randomBytes(32), sig, bundle) // a fresh round nonce makes the old signature stale
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/does not match peer/)
   })

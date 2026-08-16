@@ -14,15 +14,15 @@ export interface ReportDataBinding {
 
 /**
  * A genuine-Intel-TDX capability: proves a party runs in a genuine Intel TDX enclave.
- * DCAP-verifies the quote (ECDSA sig + PCK chain to Intel's root + TCB), requires an
- * acceptable TCB, requires it is a TDX (TD10) quote, and requires TDX debug not enabled.
- * It ALSO parses out the authenticated measurements (MRTD, RTMR0-3, report_data) into a
- * shared ParsedTdxQuote so dependent caps (measured-image) reuse the exact same verified
- * quote instead of re-parsing untrusted bytes.
+ * It DCAP-verifies the quote (ECDSA sig + PCK chain to Intel's root + TCB), requires an
+ * acceptable TCB, requires a TDX (TD10) quote, and requires TDX debug off. It also parses
+ * the authenticated measurements (MRTD, RTMR0-3, report_data) into a shared ParsedTdxQuote,
+ * so dependent caps (measured-image) reuse the same verified quote instead of re-parsing
+ * untrusted bytes.
  *
- * Two instances are minted from the ONE factory below (makeTdxCap), differing only by
- * id + collector source + evidence key: the AntSeed seller NODE's own TEE (configfs), and
- * the downstream inference PROVIDER's TEE (http). Same verify logic; independent evidence.
+ * The one factory below (makeTdxCap) mints two instances. They differ only by id, collector
+ * source, and evidence key: the AntSeed seller node's own TEE (configfs), and the downstream
+ * inference provider's TEE (http). Same verify logic; independent evidence.
  */
 
 /** The AntSeed seller node's own TEE (mints its quote locally via configfs). */
@@ -31,9 +31,9 @@ export const NODE_TEE_CAP_ID = 'seller-node-tee-genuine'
 export const PROVIDER_TEE_CAP_ID = 'seller-provider-tee-genuine'
 
 /**
- * Config-key convention: each TDX cap reads its OWN collector settings from `<capId>.<key>`
- * in the shared config map, so the node cap and the provider cap never collide. Kept in one
- * place so the prover writes the same keys the factory reads.
+ * Config-key convention: each TDX cap reads its own collector settings from `<capId>.<key>`
+ * in the shared config map, so the node cap and the provider cap never collide. It lives in
+ * one place, so the prover writes the same keys the factory reads.
  */
 export function tdxConfigKey(id: string, key: string): string {
   return `${id}.${key}`
@@ -42,8 +42,8 @@ export function tdxConfigKey(id: string, key: string): string {
 /**
  * TCB acceptance. UpToDate is always genuine hardware. SWHardeningNeeded flags guest-side
  * software mitigations only — not a hardware compromise — and is accepted by default (real
- * GCP TDX quotes routinely report it); set ANTSEED_VERIFIER_STRICT_TCB=true to require
- * UpToDate exactly. Anything else (OutOfDate, Revoked, Unknown, ...) is rejected.
+ * GCP TDX quotes often report it). Set ANTSEED_VERIFIER_STRICT_TCB=true to require UpToDate
+ * exactly. Anything else (OutOfDate, Revoked, Unknown, ...) is rejected.
  */
 export function isTcbAcceptable(status: string): boolean {
   if (status === 'UpToDate') return true
@@ -77,9 +77,9 @@ export type VerifyQuoteFn = (
 ) => Promise<RawTdxVerification>
 
 /**
- * The shared, verified quote handed to every capability for this attestation round.
+ * The shared, verified quote given to every capability for this attestation round.
  * `quoteEvidence` is always the exact tee-tdx evidence bytes the seller returned (so
- * seller-bound can hash the same bytes); `td` is present only when DCAP parsing yielded
+ * seller-bound can hash the same bytes). `td` is present only when DCAP parsing yields
  * a TDX report.
  */
 export interface ParsedTdxQuote {
@@ -125,9 +125,9 @@ export function decodeTeeTdxEvidence(bytes: Uint8Array): { quote: Uint8Array; co
 }
 
 /**
- * Default DCAP verifier: validates the quote's ECDSA signature + PCK cert chain to
- * Intel's production root CA + TCB, and extracts the TD10 measurements. When the seller
- * supplied collateral we use it; otherwise we fetch it from a public PCCS. @phala/dcap-qvl
+ * Default DCAP verifier: it validates the quote's ECDSA signature + PCK cert chain to
+ * Intel's production root CA + TCB, and reads the TD10 measurements. It uses the seller's
+ * collateral when supplied; otherwise it fetches collateral from a public PCCS. @phala/dcap-qvl
  * is imported lazily so the seller/prover half never loads it.
  */
 export const defaultVerifyQuote: VerifyQuoteFn = async (quote, collateral, nowSecs) => {
@@ -154,8 +154,8 @@ export const defaultVerifyQuote: VerifyQuoteFn = async (quote, collateral, nowSe
 }
 
 /**
- * DCAP-verify the tee-tdx evidence and build the shared ParsedTdxQuote. Never throws:
- * decode/verify errors are captured in `error` so dependent caps still see the raw
+ * DCAP-verify the tee-tdx evidence and build the shared ParsedTdxQuote. It never throws:
+ * decode or verify errors are captured in `error`, so dependent caps still see the raw
  * `quoteEvidence` bytes (seller-bound only needs those to bind identity to the quote).
  */
 export async function verifyTdxEvidence(
@@ -188,15 +188,15 @@ function hex(b: Uint8Array): string {
 }
 
 /**
- * Mint one TDX capability. `id` names the target (node vs provider); `defaultSource`
+ * Mint one TDX capability. `id` names the target (node or provider); `defaultSource`
  * is the collector used when config supplies no `<id>.source` override:
  *   'configfs': self-hosted TDX minted locally via configfs-tsm; report_data = antseed-rd-v1 {peerId}
  *   'dstack'  : self-hosted TDX minted via the dstack guest-agent socket (Phala CVMs, where
  *               configfs-tsm is absent); same antseed-rd-v1 {peerId} report_data as configfs
  *   'http'    : a pre-made quote fetched from a config-supplied evidence route ({nonce} hex)
- * verify reads this cap's OWN parsed quote (the orchestrator DCAP-verifies each cap's
+ * verify reads this cap's own parsed quote (the orchestrator DCAP-verifies each cap's
  * own evidence entry independently). collect throws when its source is unavailable
- * (off-TEE for configfs, or no url for http), so the prover simply omits the cap.
+ * (off-TEE for configfs, or no url for http), so the prover omits the cap.
  */
 export function makeTdxCap(
   id: string,
@@ -216,9 +216,9 @@ export function makeTdxCap(
       if (!p.td) return { claim, ok: false, detail: 'quote is not an Intel TDX quote' }
       if (p.td.debug === true) return { claim, ok: false, detail: 'TDX debug mode is enabled' }
       // Bind report_data to this round: the node cap to its {peerId} identity, a provider cap
-      // to whatever frozen scheme its evidence declares. Fail-closed — a borrowed/relayed/stale
-      // quote can't match a fresh-nonce commitment. A provider quote with NO declared scheme
-      // still passes on genuineness, but its detail must disclose that freshness was not proven.
+      // to whatever frozen scheme its evidence declares. Fail-closed — a borrowed, relayed, or
+      // stale quote cannot match a fresh-nonce commitment. A provider quote with no declared
+      // scheme still passes on genuineness, but its detail must disclose that freshness was not proven.
       const binding: ReportDataBinding | undefined = opts?.bindNoncePeerId
         ? { scheme: antseedRdV1.id, ingredients: { peerId: input.peerId } }
         : p.binding
@@ -255,9 +255,9 @@ export function makeTdxCap(
         if (!scheme) {
           return encodeTeeTdxEvidence(await collectViaHttp(url, input.nonce, field))
         }
-        // Declare the provider's frozen report_data scheme + its ingredients (e.g. the E2E
-        // pubkey) so the buyer can verify the quote is bound to this round. Both come from ONE
-        // fetch so the quote and the pubkey are from the same response (no cross-fetch skew).
+        // Declare the provider's frozen report_data scheme and its ingredients (e.g. the E2E
+        // pubkey) so the buyer can verify the quote is bound to this round. Both come from one
+        // fetch, so the quote and the pubkey are from the same response (no cross-fetch skew).
         const pubkeyField = input.config[tdxConfigKey(id, 'binding.pubkeyField')]
         const { quote, pubkey } = await collectTdxAndPubkey(url, input.nonce, field, pubkeyField)
         const ingredients = pubkey ? { e2ePubkey: pubkey } : {}
@@ -268,7 +268,7 @@ export function makeTdxCap(
   }
 }
 
-/** The AntSeed seller NODE's own TEE — mints its quote locally via configfs; report_data bound to nonce+peerId. */
+/** The AntSeed seller node's own TEE — mints its quote locally via configfs; report_data bound to nonce+peerId. */
 export const nodeTeeCapability = makeTdxCap(NODE_TEE_CAP_ID, 'configfs', { bindNoncePeerId: true })
-/** The downstream inference PROVIDER's TEE — quote fetched from the provider's evidence route. */
+/** The downstream inference provider's TEE — quote fetched from the provider's evidence route. */
 export const providerTeeCapability = makeTdxCap(PROVIDER_TEE_CAP_ID, 'http')

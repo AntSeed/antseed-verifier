@@ -1,5 +1,0 @@
-test:      Tests  141 passed (141)
-typecheck: exit=0
-build:     exit=0
-node-tee:  NODE_TEE_PASS: true
-chutes:    CHUTES_PROVIDER_PASS: true

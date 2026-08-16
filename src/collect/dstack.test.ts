@@ -16,8 +16,8 @@ interface Stub {
 }
 
 /**
- * A real dstack guest-agent stub over a unix socket (no mocks): answers POST /GetQuote by
- * calling `respond(reportDataHex)`; return null to emit HTTP 500. Byte-for-byte the wire
+ * A dstack guest-agent stub over a unix socket, with no mocks. It answers POST /GetQuote by
+ * a call to `respond(reportDataHex)`. Return null to emit HTTP 500. This is the exact wire
  * contract generateDstackQuote must speak.
  */
 async function startDstackStub(respond: (reportDataHex: string) => unknown): Promise<Stub> {
@@ -90,7 +90,7 @@ describe('node-tee capability — dstack source', () => {
   afterEach(async () => { await stub?.close(); stub = undefined })
 
   it('mints via the dstack socket, binding report_data = antseed-rd-v1{peerId}', async () => {
-    // Echo the received report_data back as the quote so we can assert the exact minted bytes.
+    // Echo the received report_data back as the quote so a test can assert the exact minted bytes.
     stub = await startDstackStub((rdHex) => ({ quote: rdHex }))
     const nonce = new Uint8Array(randomBytes(32))
     const peerId = 'a'.repeat(40)

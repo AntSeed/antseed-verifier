@@ -16,23 +16,23 @@ import {
 } from '../nras.js'
 
 /**
- * Capability 'seller-provider-gpu-cc': proves the inference PROVIDER's GPUs run NVIDIA
+ * Capability 'seller-provider-gpu-cc': proves the inference provider's GPUs run NVIDIA
  * Confidential Computing, via NVIDIA's Remote Attestation Service (NRAS). The buyer submits
- * the provider's per-GPU CC evidence + the buyer's nonce to NRAS and verifies the returned
- * EAR (signed JWT): signature valid against NVIDIA's JWKS, overall result success, CC mode,
- * and the nonce bound to THIS round.
+ * the provider's per-GPU CC evidence and the buyer's nonce to NRAS, then verifies the returned
+ * EAR (signed JWT): the signature is valid against NVIDIA's JWKS, the overall result is success,
+ * the CC mode is on, and the nonce binds this round.
  *
- * INFORMATIONAL, not required: a CPU-only seller (no GPUs) must still verify, so this cap is
- * never in the buyer's required set. It's offered only when the seller configures a provider
- * evidence route AND a GPU evidence field; otherwise the seller simply omits it. The buyer-side
- * check goes through an injectable GpuVerifyFn (see below) so a future offline verifier drops in.
+ * Informational, not required: a CPU-only seller (no GPUs) must still verify, so this cap is
+ * never in the buyer's required set. The seller offers it only when it configures a provider
+ * evidence route and a GPU evidence field; otherwise it omits the cap. The buyer-side check goes
+ * through an injectable GpuVerifyFn (see below) so an offline verifier can replace it.
  */
 
 export const GPU_CAP_ID = 'seller-provider-gpu-cc'
 
-/** Reserved mode switch: 'nras' (default, verify via NRAS) | 'local' (offline; not yet built). */
+/** Mode switch: 'nras' (default, verify via NRAS) or 'local' (offline; not implemented). */
 const GPU_MODE_ENV = 'ANTSEED_VERIFIER_GPU_MODE'
-/** Env overrides for NVIDIA's endpoints (defaults point at NRAS; handy for tests/staging). */
+/** Env overrides for NVIDIA's endpoints (defaults point at NRAS; useful for tests and staging). */
 const NRAS_URL_ENV = 'ANTSEED_VERIFIER_NRAS_URL'
 const NRAS_JWKS_ENV = 'ANTSEED_VERIFIER_NRAS_JWKS_URL'
 
@@ -40,14 +40,14 @@ const NRAS_JWKS_ENV = 'ANTSEED_VERIFIER_NRAS_JWKS_URL'
 export interface GpuVerification {
   ok: boolean
   detail: string
-  /** Set on network/service errors (NRAS unreachable), which are retryable, not a real verdict. */
+  /** Set on network or service errors (NRAS unreachable). These are retryable, not a real verdict. */
   transient?: boolean
 }
 
 /**
  * The injectable seam: verify a provider's GPU-CC evidence against the buyer's nonce. The
- * default is NRAS; a future localGpuVerify implements the offline path behind the SAME type,
- * so swapping it in requires no cap change. Tests inject a stub to exercise the cap's policy.
+ * default is NRAS. A localGpuVerify implements the offline path behind the same type, so a
+ * swap needs no cap change. Tests inject a stub to exercise the cap's policy.
  */
 export type GpuVerifyFn = (evidence: Uint8Array, nonce: Uint8Array) => Promise<GpuVerification>
 
@@ -56,7 +56,7 @@ function decodeGpuEvidence(bytes: Uint8Array): NvidiaGpuEvidence {
   return JSON.parse(new TextDecoder().decode(bytes)) as NvidiaGpuEvidence
 }
 
-/** Config for the NRAS verifier; all optional so production uses NVIDIA defaults + real JWKS. */
+/** Config for the NRAS verifier. All fields are optional, so production uses NVIDIA defaults and real JWKS. */
 export interface NrasOptions {
   nrasUrl?: string
   jwksUrl?: string
@@ -67,10 +67,10 @@ export interface NrasOptions {
 }
 
 /**
- * Build a NRAS-backed GpuVerifyFn. Submits the provider evidence + nonce to NRAS and verifies
- * the EAR. Network/service errors are marked transient (retryable); anything else (malformed
- * evidence, bad signature, failed claim, nonce mismatch) fails closed as a real verdict. jose
- * is imported lazily (only here) so the seller half and CPU-only buyers never load it.
+ * Build a NRAS-backed GpuVerifyFn. It submits the provider evidence and nonce to NRAS and
+ * verifies the EAR. Network or service errors are marked transient (retryable). Anything else
+ * (malformed evidence, bad signature, failed claim, nonce mismatch) fails closed as a real
+ * verdict. jose is imported lazily (only here) so the seller half and CPU-only buyers never load it.
  */
 export function makeNrasGpuVerify(opts: NrasOptions = {}): GpuVerifyFn {
   return async (evidenceBytes, nonce) => {
@@ -87,7 +87,7 @@ export function makeNrasGpuVerify(opts: NrasOptions = {}): GpuVerifyFn {
     try {
       response = await (opts.submit ?? defaultNrasSubmit)(nrasUrl, request)
     } catch (err) {
-      // NRAS unreachable / 5xx — transient, not an attestation verdict.
+      // NRAS unreachable or 5xx — transient, not an attestation verdict.
       return { ok: false, transient: true, detail: `NRAS request failed: ${msg(err)}` }
     }
 
@@ -108,15 +108,15 @@ export const nrasGpuVerify: GpuVerifyFn = makeNrasGpuVerify()
 
 /**
  * Offline GPU verifier — reserved for the nvtrust-style local path (report + device cert chain
- * + RIM, no external service). Not yet built: returns a clear, non-transient error so operators
- * who set ANTSEED_VERIFIER_GPU_MODE=local get an explicit "not implemented" rather than silence.
+ * + RIM, no external service). Not implemented: it returns a clear, non-transient error so an
+ * operator who sets ANTSEED_VERIFIER_GPU_MODE=local gets an explicit "not implemented", not silence.
  */
 export const localGpuVerify: GpuVerifyFn = async () => ({
   ok: false,
   detail: 'offline GPU verification not yet implemented (ANTSEED_VERIFIER_GPU_MODE=local)',
 })
 
-/** Dispatch on ANTSEED_VERIFIER_GPU_MODE: NRAS now, local later. Unknown mode fails closed. */
+/** Dispatch on ANTSEED_VERIFIER_GPU_MODE: 'nras' or 'local'. An unknown mode fails closed. */
 export const defaultGpuVerify: GpuVerifyFn = (evidence, nonce) => {
   const mode = (process.env[GPU_MODE_ENV]?.trim() || 'nras').toLowerCase()
   if (mode === 'local') return localGpuVerify(evidence, nonce)
@@ -135,10 +135,10 @@ function msg(err: unknown): string {
 
 /**
  * The nonce to submit to NRAS this round. A provider that binds its TDX quote with a report_data
- * scheme (e.g. Chutes' nonce-pubkey-sha256-v1) also binds its GPU evidence to that scheme's DERIVED
- * nonce, not the raw round nonce — so we ask the declared scheme for it. Absent a scheme, the raw
- * nonce. Read from the already-collected provider quote in the bundle; any decode issue falls back
- * to the raw nonce (fail-open here is safe — verifyEar still enforces the eat_nonce match).
+ * scheme (e.g. Chutes' nonce-pubkey-sha256-v1) also binds its GPU evidence to that scheme's derived
+ * nonce, not the raw round nonce — so the code asks the declared scheme for it. With no scheme, it
+ * uses the raw nonce. It reads the provider quote from the bundle; any decode issue falls back to
+ * the raw nonce (fail-open is safe here — verifyEar still enforces the eat_nonce match).
  */
 function nrasNonceFor(nonce: Uint8Array, bundle: Record<string, Uint8Array> | undefined): Uint8Array {
   const providerEvidence = bundle?.[PROVIDER_TEE_CAP_ID]
@@ -155,9 +155,9 @@ function nrasNonceFor(nonce: Uint8Array, bundle: Record<string, Uint8Array> | un
 
 /**
  * Mint the GPU-CC capability. `gpuVerify` is the injected buyer-side check (default: NRAS);
- * tests pass a stub. collect fetches the provider's GPU evidence from the SAME provider
- * evidence route as the TDX quote (config-supplied url + field), and throws — so the cap is
- * omitted — when either is absent.
+ * tests pass a stub. collect fetches the provider's GPU evidence from the same provider
+ * evidence route as the TDX quote (config-supplied url and field). It throws when either is
+ * absent, so the cap is omitted.
  */
 export function makeGpuNvidiaCap(gpuVerify: GpuVerifyFn = defaultGpuVerify): Capability {
   return {
@@ -165,10 +165,10 @@ export function makeGpuNvidiaCap(gpuVerify: GpuVerifyFn = defaultGpuVerify): Cap
 
     async verify(input: CapabilityVerifyInput): Promise<ClaimResult> {
       const claim = claimId(GPU_CAP_ID)
-      // Fail-closed: no evidence means we cannot attest the GPUs.
+      // Fail-closed: no evidence means the GPUs cannot be attested.
       if (!input.evidence) return { claim, ok: false, detail: 'seller returned no GPU CC evidence' }
       const r = await gpuVerify(input.evidence, nrasNonceFor(input.nonce, input.evidenceBundle))
-      // ClaimResult has no transient field; surface retryability in the human-readable detail.
+      // ClaimResult has no transient field; show retryability in the human-readable detail.
       const detail = r.transient ? `[transient] ${r.detail}` : r.detail
       return { claim, ok: r.ok, detail }
     },

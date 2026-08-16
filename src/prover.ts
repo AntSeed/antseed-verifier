@@ -16,22 +16,22 @@ import {
 
 /**
  * Seller half — embedded prover (type:'prover'). For each requested capability the seller
- * SUPPORTS (has a collector for, and whose collection succeeds), it produces evidence and
- * assembles a per-cap evidence map. Unsupported caps are simply omitted. Provider
- * differences are handled purely by config (no provider specifics live here).
+ * supports (has a collector for, and whose collection succeeds), it produces evidence and
+ * builds a per-cap evidence map. It omits unsupported caps. Config alone handles provider
+ * differences (no provider specifics live here).
  *
- * Env config (each provider cap is offered only when the evidence URL AND its field are set,
- * all off the SAME route):
+ * Env config (the seller offers each provider cap only when the evidence URL and its field are
+ * set, all off the same route):
  *   ANTSEED_TEE_PEER_ID                    this node's peer id (EVM address, no 0x) — required
  *   ANTSEED_VERIFIER_NODE_TEE              seller-node-tee-genuine source: "configfs" (default), "dstack", or "http"
  *   ANTSEED_VERIFIER_DSTACK_SOCKET         override the dstack guest-agent socket path (default /var/run/dstack.sock)
  *   ANTSEED_VERIFIER_PROVIDER_ADAPTER      in-process provider adapter id (e.g. "chutes", "aci"); fetches provider evidence directly, no separate shim
- *   ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL provider evidence route ({nonce} hex placeholder); enables seller-provider-tee-genuine via http (alternative to an adapter)
- *   ANTSEED_VERIFIER_PROVIDER_TEE_FIELD    JSON field holding the base64 provider quote (default "quote")
- *   ANTSEED_VERIFIER_PROVIDER_GPU_FIELD    JSON field holding the provider's GPU CC evidence; enables seller-provider-gpu-cc
- *   ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD JSON field holding the provider's base64 claims document; enables seller-provider-claims
+ *   ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL provider evidence route ({nonce} hex placeholder); offers seller-provider-tee-genuine via http (alternative to an adapter)
+ *   ANTSEED_VERIFIER_PROVIDER_TEE_FIELD    JSON field that holds the base64 provider quote (default "quote")
+ *   ANTSEED_VERIFIER_PROVIDER_GPU_FIELD    JSON field that holds the provider's GPU CC evidence; offers seller-provider-gpu-cc
+ *   ANTSEED_VERIFIER_PROVIDER_CLAIMS_FIELD JSON field that holds the provider's base64 claims document; offers seller-provider-claims
  *   ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME       frozen report_data scheme the provider quote uses (e.g. "nonce-pubkey-sha256-v1"); buyer then verifies round binding
- *   ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD JSON field holding the provider's base64 E2E pubkey (the ingredient that scheme binds)
+ *   ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD JSON field that holds the provider's base64 E2E pubkey (the ingredient that scheme binds)
  *   ANTSEED_VERIFIER_SIGNING_KEY           seller identity private key (hex) for seller-bound
  */
 
@@ -53,10 +53,10 @@ function msg(err: unknown): string {
 
 /**
  * Provider adapter path: when ANTSEED_VERIFIER_PROVIDER_ADAPTER names an adapter, fetch the
- * provider's evidence in-process (the adapter handles that provider's auth + response shape) and
- * map it onto the provider caps — instead of the generic http evidence route. The evidence is
- * also exposed as evidence:<capId> config so seller-bound binds it. A failure omits the provider
- * caps, exactly like an unconfigured http route.
+ * provider's evidence in-process (the adapter handles that provider's auth and response shape)
+ * and map it onto the provider caps, instead of the generic http evidence route. The evidence
+ * is also exposed as evidence:<capId> config so seller-bound binds it. A failure omits the
+ * provider caps, like an unconfigured http route.
  */
 async function collectViaAdapter(
   nonce: Uint8Array,
@@ -96,7 +96,7 @@ function json(statusCode: number, body: unknown): SellerResponse {
 /**
  * Generic, provider-neutral collector config, namespaced per TDX cap so the node cap and
  * the provider cap never collide. The node cap defaults to a local configfs quote; the
- * provider cap is offered (via http) only when a provider evidence URL is configured.
+ * seller offers the provider cap (via http) only when a provider evidence URL is configured.
  */
 function baseConfig(): Record<string, string> {
   const cfg: Record<string, string> = {}
@@ -105,27 +105,27 @@ function baseConfig(): Record<string, string> {
   // Optional dstack guest-agent socket override (Phala CVMs); default locations are used when unset.
   const dstackSocket = process.env[DSTACK_SOCKET]?.trim()
   if (dstackSocket) cfg[tdxConfigKey(NODE_TEE_CAP_ID, 'dstack.socket')] = dstackSocket
-  // seller-provider-tee-genuine: only offered when a provider evidence route is configured.
+  // seller-provider-tee-genuine: offered only when a provider evidence route is configured.
   const provUrl = process.env[PROVIDER_EVIDENCE_URL]?.trim()
   if (provUrl) {
     cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'source')] = 'http'
     cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'url')] = provUrl
     cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'field')] = process.env[PROVIDER_TEE_FIELD]?.trim() || 'quote'
     // Optional: declare the provider's frozen report_data scheme so the buyer verifies the
-    // provider quote is bound to THIS round + instance (e.g. Chutes' nonce-pubkey-sha256-v1).
+    // provider quote is bound to this round and instance (e.g. Chutes' nonce-pubkey-sha256-v1).
     const bindingScheme = process.env[PROVIDER_BINDING_SCHEME]?.trim()
     if (bindingScheme) {
       cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'binding.scheme')] = bindingScheme
       const pubkeyField = process.env[PROVIDER_BINDING_PUBKEY_FIELD]?.trim()
       if (pubkeyField) cfg[tdxConfigKey(PROVIDER_TEE_CAP_ID, 'binding.pubkeyField')] = pubkeyField
     }
-    // seller-provider-gpu-cc: same evidence route, but only offered when a GPU field is named.
+    // seller-provider-gpu-cc: same evidence route, offered only when a GPU field is named.
     const gpuField = process.env[PROVIDER_GPU_FIELD]?.trim()
     if (gpuField) {
       cfg[gpuConfigKey('url')] = provUrl
       cfg[gpuConfigKey('field')] = gpuField
     }
-    // seller-provider-claims: same evidence route, only offered when a claims field is named.
+    // seller-provider-claims: same evidence route, offered only when a claims field is named.
     const claimsField = process.env[PROVIDER_CLAIMS_FIELD]?.trim()
     if (claimsField) {
       cfg[claimsConfigKey('url')] = provUrl
@@ -136,9 +136,9 @@ function baseConfig(): Record<string, string> {
 }
 
 /**
- * A signer for seller-bound, built from the seller's private key. Returns undefined when
+ * A signer for seller-bound, built from the seller's private key. It returns undefined when
  * no key is set (cap not offered) or the key's address does not match this node's peer id
- * (a mismatch would only fail on the buyer, so we disable it and log instead).
+ * (a mismatch would only fail on the buyer, so the prover disables it and logs instead).
  */
 function buildSigner(peerId: string): ((m: Uint8Array) => Promise<Uint8Array>) | undefined {
   const key = process.env[SIGNING_KEY]?.trim()

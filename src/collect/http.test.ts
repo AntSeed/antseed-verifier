@@ -5,7 +5,7 @@ import { collectViaHttp, collectJsonFieldViaHttp } from './http.js'
 const NONCE = randomBytes(32)
 const HEX = Buffer.from(NONCE).toString('hex')
 
-/** Stub fetch: capture the URL, return a JSON body. */
+/** Stub fetch: capture the URL and return a JSON body. */
 function stubFetch(body: unknown, ok = true, status = 200): { seenUrl: () => string } {
   let url = ''
   vi.stubGlobal('fetch', vi.fn(async (u: string) => {

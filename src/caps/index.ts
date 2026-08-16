@@ -7,10 +7,10 @@ import { providerClaimsCapability } from './provider-claims.js'
 
 /**
  * Registration order defines both the advertised menu order and the seller's collect order.
- * INVARIANT: seller-bound signs over the WHOLE bundle, so every evidence-producing cap (the
- * TDX caps, gpu-cc AND provider-claims) MUST be registered BEFORE seller-bound, so they are
+ * Invariant: seller-bound signs over the whole bundle, so every evidence-producing cap (the
+ * TDX caps, gpu-cc and provider-claims) must be registered before seller-bound. They are then
  * already collected when it builds the digest it signs. measured-image derives from the
- * provider quote (no own evidence), so its position is immaterial.
+ * provider quote (no own evidence), so its position does not matter.
  */
 registerCapability(nodeTeeCapability)
 registerCapability(providerTeeCapability)

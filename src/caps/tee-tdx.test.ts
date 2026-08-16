@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { randomBytes } from 'node:crypto'
 
-// Stub the configfs collector so the node cap's collect runs off-TEE: echo the report_data
-// back as the "quote" so we can assert the nonce+peer binding the collector applied.
+// Stub the configfs collector so the node cap collect runs off-TEE. It echoes the report_data
+// back as the quote, so a test can assert the nonce and peer binding the collector applied.
 vi.mock('../collect/configfs.js', () => ({
   generateTdxQuote: (reportData: Uint8Array) => reportData,
 }))
@@ -29,8 +29,8 @@ const PEER = 'f'.repeat(40)
 afterEach(() => vi.unstubAllGlobals())
 
 /**
- * A plausible TD10 measurement set; override fields per test. report_data defaults to the
- * node cap's antseed-rd-v1 {peerId} binding, so the node binding check passes unless a test overrides it.
+ * A TD10 measurement set. Override fields per test. report_data defaults to the node cap
+ * antseed-rd-v1 {peerId} binding, so the node binding check passes unless a test overrides it.
  */
 function td(over: Partial<TdMeasurements> = {}): TdMeasurements {
   return {
@@ -45,13 +45,13 @@ function td(over: Partial<TdMeasurements> = {}): TdMeasurements {
   }
 }
 
-/** Run verifyTdxEvidence (stubbed DCAP) then the cap's policy check, as the orchestrator does. */
+/** Run verifyTdxEvidence with a stub DCAP, then the cap policy check, as the orchestrator does. */
 async function run(cap: Capability, stub: VerifyQuoteFn, evidence = encodeTeeTdxEvidence(randomBytes(64))) {
   const parsed = await verifyTdxEvidence(evidence, stub, Math.floor(Date.now() / 1000))
   return cap.verify({ nonce: NONCE, peerId: PEER, evidence, parsedQuote: parsed })
 }
 
-// The verify logic is shared by both caps (one factory); exercise it via the node cap.
+// One factory builds the verify logic for both caps. Exercise it through the node cap.
 describe('TDX cap verify (seller-node-tee-genuine)', () => {
   const CLAIM = claimId(NODE_TEE_CAP_ID)
 
@@ -84,7 +84,7 @@ describe('TDX cap verify (seller-node-tee-genuine)', () => {
   })
 
   it('rejects a genuine quote whose report_data is not bound to this nonce+peerId', async () => {
-    // A borrowed/relayed/replayed genuine quote — everything checks out EXCEPT the binding.
+    // A borrowed, relayed, or replayed genuine quote. Everything checks out except the binding.
     const r = await run(nodeTeeCapability, async () => ({ status: 'UpToDate', td: td({ reportData: new Uint8Array(64) }) }))
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/does not match scheme "antseed-rd-v1"/)
@@ -124,7 +124,7 @@ describe('TDX cap verify (seller-node-tee-genuine)', () => {
 describe('provider cap — declared report_data scheme binding', () => {
   const now = Math.floor(Date.now() / 1000)
   const PUBKEY = Buffer.from(randomBytes(32)).toString('base64')
-  // Stub DCAP that reflects the quote bytes as report_data (real DCAP reads them from the quote).
+  // Stub DCAP reflects the quote bytes as report_data. Real DCAP reads them from the quote.
   const reflect: VerifyQuoteFn = async (quote) => ({
     status: 'UpToDate',
     td: td({ reportData: quote.length >= 64 ? new Uint8Array(quote.subarray(0, 64)) : new Uint8Array(64) }),
@@ -149,11 +149,11 @@ describe('provider cap — declared report_data scheme binding', () => {
 
   it('with no declared scheme, stays genuineness-only', async () => {
     const r = await run(providerTeeCapability, async () => ({ status: 'UpToDate', td: td() }))
-    expect(r.ok).toBe(true) // no binding on the evidence → report_data not checked
+    expect(r.ok).toBe(true) // no binding on the evidence, so report_data is not checked
   })
 })
 
-// Both caps come from the same factory but carry distinct ids + independent evidence.
+// Both caps come from the same factory but carry distinct ids and independent evidence.
 describe('two TDX caps from one factory', () => {
   it('the provider cap verifies to its own distinct claim id', async () => {
     const r = await run(providerTeeCapability, async () => ({ status: 'UpToDate', td: td() }))
@@ -167,7 +167,7 @@ describe('seller-node-tee-genuine collect (configfs, stubbed)', () => {
   it('mints a quote bound to report_data = SHA-512(nonce ‖ peerId)', async () => {
     const ev = await nodeTeeCapability.collect!({ nonce: NONCE, peerId: PEER, config: {} })
     const { quote } = decodeTeeTdxEvidence(ev)
-    // The stub echoes report_data as the quote — assert the collector bound nonce + peer.
+    // The stub echoes report_data as the quote. Assert the collector bound nonce and peer.
     expect(Buffer.from(quote).equals(computeReportData(NONCE, PEER))).toBe(true)
   })
 })
@@ -195,10 +195,10 @@ describe('seller-provider-tee-genuine collect (http, stubbed fetch)', () => {
 })
 
 /**
- * Guard: lock the TD10 field locations defaultVerifyQuote relies on
- * (asTd10().mrTd / rtMr0 / tdAttributes / reportData) against @phala/dcap-qvl's parser,
- * using a synthetic but structurally-valid v4 TDX quote. Full cryptographic verify is
- * exercised only in the GCP e2e (needs a genuine signed quote + collateral).
+ * Lock the TD10 field locations defaultVerifyQuote relies on
+ * (asTd10().mrTd, rtMr0, tdAttributes, reportData) against the @phala/dcap-qvl parser.
+ * Use a synthetic but structurally valid v4 TDX quote. The GCP e2e exercises the full
+ * cryptographic verify, which needs a genuine signed quote and collateral.
  */
 describe('@phala/dcap-qvl TD10 field extraction', () => {
   it('exposes mrTd, rtMr0, tdAttributes and reportData at the expected offsets', async () => {

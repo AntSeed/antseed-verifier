@@ -6,9 +6,9 @@ import { PROVIDER_CLAIMS_CAP_ID } from './caps/provider-claims.js'
 import { decodeTeeTdxEvidence } from './caps/tee-tdx.js'
 
 /**
- * Seller-side opt-in semantics: the prover offers ONLY the capabilities that are (a)
- * requested by the buyer AND (b) configured/supported by this seller — everything else
- * is omitted, not failed. Committing to the verifier never means committing to every claim.
+ * Seller-side opt-in semantics: the prover offers only the capabilities that the buyer
+ * requests and this seller supports. It omits everything else instead of a failure. A
+ * commit to the verifier does not commit to every claim.
  */
 
 const PEER = 'ab'.repeat(20)
@@ -88,7 +88,7 @@ describe('prover — provider-claims opt-in', () => {
 
 describe('prover — in-process provider adapter', () => {
   it('chutes adapter fetches provider evidence in-process and binds it under seller-provider-tee-genuine', async () => {
-    delete process.env['ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL'] // adapter path only
+    delete process.env['ANTSEED_VERIFIER_PROVIDER_EVIDENCE_URL'] // use the adapter path only
     process.env['ANTSEED_VERIFIER_PROVIDER_ADAPTER'] = 'chutes'
     process.env['CHUTES_API_KEY'] = 'k'
     process.env['CHUTES_CHUTE'] = 'mychute'

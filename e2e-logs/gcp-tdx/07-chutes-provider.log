@@ -1,7 +1,0 @@
-chutes provider-tee result: {
-  "claim": "refoundhq-antseed-verifier:seller-provider-tee-genuine",
-  "ok": true,
-  "detail": "genuine Intel TDX quote (TCB UpToDate); MRTD 261ce538b435e2d0…; bound to this round (nonce-pubkey-sha256-v1)"
-}
-CHUTES_PROVIDER_PASS: true
-exit=0

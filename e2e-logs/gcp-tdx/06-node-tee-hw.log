@@ -1,7 +1,0 @@
-node-tee (antseed-rd-v1 {peerId}) result: {
-  "claim": "refoundhq-antseed-verifier:seller-node-tee-genuine",
-  "ok": true,
-  "detail": "genuine Intel TDX quote (TCB UpToDate); MRTD 9bf86e6280ec4282…; bound to this round (antseed-rd-v1)"
-}
-NODE_TEE_PASS: true
-exit=0

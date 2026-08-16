@@ -6,29 +6,29 @@ import { collectViaHttp } from '../collect/http.js'
 import { isTcbAcceptable, type ParsedTdxQuote } from './tee-tdx.js'
 
 /**
- * Capability 'seller-provider-claims': carries the inference PROVIDER's claims into the
+ * Capability 'seller-provider-claims': carries the inference provider's claims into the
  * protocol with per-claim granularity — one ClaimResult per claim, namespaced
- * '<verifier>:seller-provider-claims/<name>'. The claims menu is FROZEN IN THE SDK
- * (PROVIDER_CLAIMS_MENU below), never supplied by the seller/provider; the provider's
- * document supplies VALUES only ({ "<name>": <value> }).
+ * '<verifier>:seller-provider-claims/<name>'. The claims menu is frozen in the SDK
+ * (PROVIDER_CLAIMS_MENU below), never supplied by the seller or provider; the provider's
+ * document supplies values only ({ "<name>": <value> }).
  *
  * Frozen proof levels:
  *   'asserted'  the claim may pass on bundle integrity alone: the document rides in the
  *               evidence bundle that seller-bound signs (freshness + seller identity).
- *   'tdx-quote' the claim passes ONLY when the provider's TDX quote (independently
- *               DCAP-verified this round as seller-provider-tee-genuine) commits to this
- *               exact document + nonce in its report_data (see claimsReportData) — the
- *               claim is then attested by the provider's TEE, not merely asserted.
+ *   'tdx-quote' the claim passes only when the provider's TDX quote (verified this round
+ *               with DCAP as seller-provider-tee-genuine) commits to this exact document
+ *               and nonce in its report_data (see claimsReportData). The provider's TEE
+ *               then attests the claim; it is not merely asserted.
  * When the quote binding holds, asserted-level claims are reported TEE-attested too.
  *
- * The document is provider-authored BYTES carried verbatim (base64 field on the same
- * config-driven evidence route as the provider quote): the binding hashes the exact
+ * The document is provider-authored bytes carried verbatim (base64 field on the same
+ * config-driven evidence route as the provider quote). The binding hashes the exact
  * bytes, so no re-encoding is allowed anywhere. No provider specifics live here.
  */
 
 export const PROVIDER_CLAIMS_CAP_ID = 'seller-provider-claims'
 
-/** Config-key convention for this cap's collector, mirroring tdxConfigKey. */
+/** Config-key convention for this cap's collector; mirrors tdxConfigKey. */
 export function claimsConfigKey(key: string): string {
   return `${PROVIDER_CLAIMS_CAP_ID}.${key}`
 }
@@ -64,7 +64,7 @@ export interface ProviderClaimDefinition {
 }
 
 /**
- * THE frozen claims menu for this SDK version. Buyers verify exclusively against these
+ * The frozen claims menu for this SDK version. Buyers verify only against these
  * definitions; a document name outside this menu can never pass. Add entries only with
  * an SDK version bump (the CLI trust registry pins the exact version network-wide).
  */
@@ -135,8 +135,8 @@ function summarize(value: unknown): string {
 }
 
 /**
- * One binding verdict per document: is the provider quote genuine AND committed to these
- * exact document bytes? Shared by every claim in the doc.
+ * One binding verdict per document: is the provider quote genuine and committed to these
+ * exact document bytes? Every claim in the document shares it.
  */
 function quoteBinding(
   p: ParsedTdxQuote | undefined,
@@ -192,8 +192,8 @@ export const providerClaimsCapability: Capability = {
         results.push({ claim, ok: false, detail: bindingFailure })
         continue
       }
-      // An asserted-level pass is a signed self-assertion, NOT an independent measurement —
-      // label it so buyer UIs/policy cannot render it as "verified".
+      // An asserted-level pass is a signed self-assertion, not an independent measurement.
+      // Label it so buyer UIs and policy cannot render it as "verified".
       results.push({
         claim,
         ok: true,
@@ -211,8 +211,8 @@ export const providerClaimsCapability: Capability = {
     if (!url || !field) {
       throw new Error(`${PROVIDER_CLAIMS_CAP_ID} requires an evidence url and a claims field; not offered`)
     }
-    // collectViaHttp base64-decodes the field — the document bytes arrive VERBATIM,
-    // which the tdx-quote binding depends on (report_data hashes the exact bytes).
+    // collectViaHttp base64-decodes the field — the document bytes arrive verbatim, which
+    // the tdx-quote binding depends on (report_data hashes the exact bytes).
     return collectViaHttp(url, input.nonce, field)
   },
 }

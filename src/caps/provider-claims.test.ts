@@ -23,7 +23,7 @@ function doc(claims: Record<string, unknown>, version: unknown = 1): Uint8Array 
   return new TextEncoder().encode(JSON.stringify({ version, claims }))
 }
 
-/** Real TDX report_data is 64 bytes; the canonical provider commitment occupies [0:32]. */
+/** TDX report_data is 64 bytes. The provider commitment occupies [0:32]. */
 function rd64(commitment: Uint8Array): Uint8Array {
   const out = new Uint8Array(64)
   out.set(commitment.subarray(0, 32), 0)
@@ -43,7 +43,7 @@ function td(commitment: Uint8Array, over: Partial<TdMeasurements> = {}): TdMeasu
   }
 }
 
-/** A provider TDX parse as the orchestrator hands it over (genuine + current TCB by default). */
+/** A provider TDX parse as the orchestrator hands it over. Default is genuine with current TCB. */
 function parsed(reportData: Uint8Array, over: Partial<ParsedTdxQuote> = {}): ParsedTdxQuote {
   return { quoteEvidence: new Uint8Array([1]), status: 'UpToDate', td: td(reportData), ...over }
 }
@@ -253,7 +253,7 @@ describe('providerClaimsCapability.collect', () => {
       },
     })
     expect(seenUrl).toBe(`https://x.example/att/${Buffer.from(NONCE).toString('hex')}`)
-    // Byte-exact: tdx-quote binding commits to these bytes, so no re-encoding is allowed.
+    // Byte-exact: the tdx-quote binding commits to these bytes, so no re-encoding is allowed.
     expect(Buffer.from(out).equals(bytes)).toBe(true)
   })
 })
