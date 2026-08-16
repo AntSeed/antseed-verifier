@@ -93,10 +93,13 @@ describe('prover — in-process provider adapter', () => {
     process.env['CHUTES_API_KEY'] = 'k'
     process.env['CHUTES_CHUTE'] = 'mychute'
     const quoteBytes = randomBytes(64)
-    vi.stubGlobal('fetch', vi.fn(async () => ({
+    // Chutes serves the pubkey and the quote from two endpoints; the adapter joins them.
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => ({
       ok: true,
       status: 200,
-      json: async () => ([{ quote: Buffer.from(quoteBytes).toString('base64'), e2e_pubkey: 'cHVia2V5' }]),
+      json: async () => String(u).includes('/e2e/instances/')
+        ? { instances: [{ instance_id: 'i-1', e2e_pubkey: 'cHVia2V5' }] }
+        : { evidence: [{ instance_id: 'i-1', quote: Buffer.from(quoteBytes).toString('base64') }] },
     })))
     const evidence = await attest([PROVIDER_TEE])
     expect(evidence[PROVIDER_TEE]).toBeDefined()

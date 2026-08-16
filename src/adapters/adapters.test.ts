@@ -32,18 +32,22 @@ describe('chutes adapter', () => {
   let server: Server | undefined
   afterEach(() => server?.close())
 
-  it('adds auth, picks an instance, decodes the b64 quote, reshapes GPU evidence', async () => {
+  it('joins the pubkey and evidence endpoints by instance_id and reshapes GPU evidence', async () => {
     const quoteBytes = randomBytes(64)
     let sawAuth: string | undefined
     const stub = await startStub((url, auth) => {
       sawAuth = auth
-      if (url.pathname !== '/chutes/mychute/evidence' || url.searchParams.get('nonce') !== nonceHex) return null
-      return { status: 200, body: [{
-        instance_id: 'i-1',
-        quote: quoteBytes.toString('base64'),
-        e2e_pubkey: 'cHVia2V5',
-        gpu_evidence: [{ arch: 'BLACKWELL', evidence: 'ev0', certificate: 'c0' }, { arch: 'BLACKWELL', evidence: 'ev1', certificate: 'c1' }],
-      }] }
+      if (url.pathname === '/e2e/instances/mychute') {
+        return { status: 200, body: { instances: [{ instance_id: 'i-1', e2e_pubkey: 'cHVia2V5', nonces: [] }], nonce_expires_in: 600 } }
+      }
+      if (url.pathname === '/chutes/mychute/evidence' && url.searchParams.get('nonce') === nonceHex) {
+        return { status: 200, body: { evidence: [{
+          instance_id: 'i-1',
+          quote: quoteBytes.toString('base64'),
+          gpu_evidence: [{ arch: 'BLACKWELL', evidence: 'ev0', certificate: 'c0' }, { arch: 'BLACKWELL', evidence: 'ev1', certificate: 'c1' }],
+        }], failed_instance_ids: [] } }
+      }
+      return null
     })
     server = stub.server
     const adapter = await loadAdapter('chutes')
@@ -53,6 +57,38 @@ describe('chutes adapter', () => {
     expect(ev.bindingScheme).toBe('nonce-pubkey-sha256-v1')
     expect(ev.ingredients?.e2ePubkey).toBe('cHVia2V5')
     expect(ev.gpuEvidence).toEqual({ arch: 'BLACKWELL', evidence_list: [{ evidence: 'ev0', certificate: 'c0' }, { evidence: 'ev1', certificate: 'c1' }] })
+  })
+
+  it('skips an empty-pubkey instance and joins the right pubkey to its quote', async () => {
+    const quoteA = randomBytes(48), quoteB = randomBytes(48)
+    const stub = await startStub((url) => {
+      if (url.pathname === '/e2e/instances/mychute') return { status: 200, body: { instances: [
+        { instance_id: 'i-1', e2e_pubkey: '' },
+        { instance_id: 'i-2', e2e_pubkey: 'cHViQg' },
+      ] } }
+      if (url.pathname === '/chutes/mychute/evidence') return { status: 200, body: { evidence: [
+        { instance_id: 'i-1', quote: quoteA.toString('base64') },
+        { instance_id: 'i-2', quote: quoteB.toString('base64') },
+      ] } }
+      return null
+    })
+    server = stub.server
+    const adapter = await loadAdapter('chutes')
+    const ev = await adapter.fetchEvidence(NONCE, { CHUTES_API_BASE: stub.base, CHUTES_API_KEY: 'k', CHUTES_CHUTE: 'mychute' })
+    expect(Buffer.from(ev.quote).equals(quoteB)).toBe(true) // picked i-2, not the empty-pubkey i-1
+    expect(ev.ingredients?.e2ePubkey).toBe('cHViQg')        // i-2's pubkey joined to i-2's quote
+  })
+
+  it('throws when no instance has both a quote and an e2e_pubkey', async () => {
+    const stub = await startStub((url) => {
+      if (url.pathname === '/e2e/instances/mychute') return { status: 200, body: { instances: [{ instance_id: 'other', e2e_pubkey: 'cHVia2V5' }] } }
+      if (url.pathname === '/chutes/mychute/evidence') return { status: 200, body: { evidence: [{ instance_id: 'i-1', quote: 'AAAA' }] } }
+      return null
+    })
+    server = stub.server
+    const adapter = await loadAdapter('chutes')
+    await expect(adapter.fetchEvidence(NONCE, { CHUTES_API_BASE: stub.base, CHUTES_API_KEY: 'k', CHUTES_CHUTE: 'mychute' }))
+      .rejects.toThrow(/no chutes instance/)
   })
 
   it('throws when required env is missing', async () => {
