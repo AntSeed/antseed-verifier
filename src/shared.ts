@@ -3,13 +3,13 @@ import { keccak_256 } from '@noble/hashes/sha3.js'
 import { antseedRdV1 } from './report-data.js'
 
 /**
- * Shared constants + wire codecs used by BOTH halves of the SDK (buyer verifier
- * and seller prover). The single source of truth for the attestation request /
+ * Shared constants and wire codecs used by both halves of the SDK (buyer verifier
+ * and seller prover). The single source of truth for the attestation request and
  * response shape and the seller-bound preimage, so both sides agree byte-for-byte.
  */
 
 /**
- * The advertised + pinned verifier id (also the seller-side prover's name).
+ * The advertised and pinned verifier id (also the seller-side prover's name).
  * Hyphenated — no '@' or '/' — so capability strings satisfy PEER_CAPABILITY_PATTERN.
  */
 export const VERIFIER_ID = 'antseed-verifier'
@@ -24,8 +24,8 @@ export function claimId(capId: string): string {
 
 /**
  * Reserved control-plane path the buyer's verifier reaches the seller's prover at.
- * The prefix MUST match @antseed/node's ANTSEED_ATTEST_PATH; the seller dispatches it
- * (before provider/service matching, free) to the prover whose name === VERIFIER_ID.
+ * The prefix must match @antseed/node's ANTSEED_ATTEST_PATH; the seller dispatches it
+ * (before provider or service matching) to the prover whose name === VERIFIER_ID.
  */
 export const ATTEST_PATH = `/_antseed/attest/${VERIFIER_ID}`
 
@@ -34,7 +34,7 @@ export const NONCE_BYTES = 32
 
 /**
  * A PeerId is the canonical AntSeed identifier: 40 lowercase hex chars (the peer's
- * EVM address, no 0x prefix). Lowercase + validate so bindings are symmetric on
+ * EVM address, no 0x prefix). Lowercase and validate it, so bindings are symmetric on
  * both sides regardless of input casing.
  */
 export function normalizePeerId(peerId: string): string {
@@ -46,7 +46,7 @@ export function normalizePeerId(peerId: string): string {
 }
 
 /**
- * The seller NODE's report_data binding: the {peerId} instance of the compositional scheme
+ * The seller node's report_data binding: the {peerId} instance of the compositional scheme
  * `antseed-rd-v1` (see report-data.ts). The configfs collector mints exactly this, so the
  * buyer's node cap recomputes and enforces the same bytes.
  */
@@ -54,16 +54,16 @@ export function computeReportData(nonce: Uint8Array, peerId: string): Buffer {
   return Buffer.from(antseedRdV1.build(nonce, { peerId: normalizePeerId(peerId) }))
 }
 
-/** The dependent capability whose own evidence is EXCLUDED from the bundle it signs over. */
+/** The dependent capability whose own evidence is excluded from the bundle it signs over. */
 const SELLER_BOUND_CAP_ID = 'seller-bound'
 
 /**
- * Canonical digest over the WHOLE attestation bundle — every cap's evidence entry
- * EXCEPT seller-bound's own signature (it cannot sign over itself). Sorting by cap id
- * makes both halves agree regardless of map iteration order; length-prefixing BOTH the id
- * and the bytes (len(id) ‖ id ‖ len(bytes) ‖ bytes) keeps the concatenation unambiguous so
+ * Canonical digest over the whole attestation bundle — every cap's evidence entry
+ * except seller-bound's own signature (it cannot sign over itself). A sort by cap id
+ * makes both halves agree regardless of map iteration order. Length-prefixing both the id
+ * and the bytes (len(id) ‖ id ‖ len(bytes) ‖ bytes) keeps the concatenation unambiguous, so
  * no cap can shift bytes across an entry boundary. One seller signature therefore covers
- * the node quote AND the provider quote (and any future caps) together.
+ * the node quote and the provider quote (and any later caps) together.
  */
 export function bundleDigest(evidence: Record<string, Uint8Array>): Uint8Array {
   const ids = Object.keys(evidence).filter((id) => id !== SELLER_BOUND_CAP_ID).sort()
@@ -86,8 +86,8 @@ export function bundleDigest(evidence: Record<string, Uint8Array>): Uint8Array {
  *
  *   keccak256( nonce(32) || bundleDigest(32) || utf8(peerId) )
  *
- * Binds the seller's identity signature to the ENTIRE bundle (via bundleDigest), THIS
- * nonce (freshness) and THIS peer id (identity), so nobody can pair a seller's signature
+ * It binds the seller's identity signature to the entire bundle (via bundleDigest), this
+ * nonce (freshness), and this peer id (identity), so nobody can pair a seller's signature
  * with different evidence or replay it. Defined here so both halves compute identical bytes.
  */
 export function sellerBoundPreimage(nonce: Uint8Array, digest: Uint8Array, peerId: string): Uint8Array {
@@ -104,7 +104,7 @@ const EVIDENCE_KEY_PREFIX = 'evidence:'
 
 /**
  * Config key under which a prover exposes an already-collected capability's evidence
- * (base64) to LATER collectors in the same request. Lets a dependent capability
+ * (base64) to later collectors in the same request. It lets a dependent capability
  * (seller-bound) read the whole bundle it must bind to, without provider specifics.
  */
 export function evidenceConfigKey(capId: string): string {
@@ -116,7 +116,7 @@ export function parseEvidenceConfigKey(key: string): string | undefined {
   return key.startsWith(EVIDENCE_KEY_PREFIX) ? key.slice(EVIDENCE_KEY_PREFIX.length) : undefined
 }
 
-/** Body the buyer sends to the prover: a fresh nonce + the menu of caps it wants. */
+/** Body the buyer sends to the prover: a fresh nonce and the menu of caps it wants. */
 export interface AttestRequestBody {
   /** base64 of the 32-byte freshness nonce. */
   nonce: string
@@ -136,7 +136,7 @@ export function encodeAttestRequest(nonce: Uint8Array, caps: string[]): Uint8Arr
 }
 
 /**
- * Upper bound on an attestation request/response body before JSON.parse. Both halves
+ * Upper bound on an attestation request or response body before JSON.parse. Both halves
  * parse counterparty-controlled bytes (the prover reads buyer requests; the buyer reads
  * seller responses), so a hostile peer must not be able to force an unbounded parse.
  */

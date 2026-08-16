@@ -3,9 +3,9 @@ import type { NvidiaGpuEvidence } from '../nras.js'
 
 /**
  * Provider evidence in the SDK's neutral shape, produced by an in-process adapter. The prover
- * maps this onto the provider capabilities (tee / gpu), so a foreign provider's API is bridged
- * with NO provider specifics in the core: the adapter is the only provider-aware code, and it is
- * loaded lazily — by id, only when ANTSEED_VERIFIER_PROVIDER_ADAPTER selects it.
+ * maps this onto the provider capabilities (tee / gpu). A foreign provider's API is bridged
+ * with no provider specifics in the core: the adapter is the only provider-aware code, and the
+ * SDK loads it lazily — by id, only when ANTSEED_VERIFIER_PROVIDER_ADAPTER selects it.
  */
 export interface ProviderEvidence {
   /** The provider's raw TDX quote bytes. */
@@ -18,16 +18,16 @@ export interface ProviderEvidence {
   gpuEvidence?: NvidiaGpuEvidence
 }
 
-/** A provider adapter: given the buyer nonce + the process env, fetch the provider's evidence. */
+/** A provider adapter. It uses the buyer nonce and the process env to fetch the provider's evidence. */
 export interface ProviderAdapter {
   id: string
   fetchEvidence(nonce: Uint8Array, env: Record<string, string | undefined>): Promise<ProviderEvidence>
 }
 
 /**
- * Allowlisted lazy registry — the ONE place adapter ids map to modules. The env only ever selects
- * a key here (never a path), so a hostile value cannot dynamic-import an arbitrary file. Add a
- * provider by adding its module + one line here; the core verify/collect path never changes.
+ * Allowlisted lazy registry — the one place adapter ids map to modules. The env only selects
+ * a key here (never a path), so a hostile value cannot dynamic-import an arbitrary file. To add a
+ * provider, add its module and one line here; the core verify/collect path never changes.
  */
 const REGISTRY: Record<string, () => Promise<{ default: ProviderAdapter }>> = {
   chutes: () => import('./chutes.js'),

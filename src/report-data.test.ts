@@ -111,7 +111,7 @@ describe('verifyReportData', () => {
 
   it('compares only compareLen bytes (Chutes leaves [32:64] to the provider)', () => {
     const quote = noncePubkeySha256V1.build(NONCE, { e2ePubkey: PUBKEY })
-    quote.set(randomBytes(32), 32) // provider put something in [32:64]
+    quote.set(randomBytes(32), 32) // the provider put bytes in [32:64]
     expect(verifyReportData('nonce-pubkey-sha256-v1', quote, NONCE, { e2ePubkey: PUBKEY })).toBeNull()
   })
 

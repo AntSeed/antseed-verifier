@@ -1,19 +1,19 @@
 import type { JWTPayload, JWTVerifyGetKey } from 'jose'
 
 /**
- * NRAS wire module — the SINGLE place the NVIDIA Remote Attestation Service request/response
- * mapping lives, so if NVIDIA's schema shifts only this file changes. Everything the rest of
+ * NRAS wire module — the single place the NVIDIA Remote Attestation Service request/response
+ * mapping lives, so a shift in NVIDIA's schema changes only this file. Everything the rest of
  * the SDK needs (build a request, submit it, verify the returned EAR) is behind these exports.
  *
- * Sources this mapping was pinned against (July 2026):
+ * Sources for this mapping (July 2026):
  *   - NRAS API reference: https://docs.attestation.nvidia.com/api-docs/nras.html
  *   - Hopper single-GPU example: https://docs.nvidia.com/attestation/quick-start-guide/latest/attestation-examples/hopper_single_gpu.html
  *   - NRAS releases (v3 evidence_list rename + detached-EAR token): https://docs.nvidia.com/attestation/technical-docs-nras/latest/nras_releases.html
  *   - NVIDIA EAT claims (Intel Trust Authority mirror): https://docs.trustauthority.intel.com/main/articles/articles/ita/concept-gpu-attestation.html
  *
- * WHY generic: NRAS is NVIDIA's own attestation service, not an AntSeed inference provider —
- * so the NVIDIA host is a sensible DEFAULT here (overridable by env), while nothing about any
- * particular provider (hostnames, evidence field names) ever appears in this module.
+ * Why generic: NRAS is NVIDIA's own attestation service, not an AntSeed inference provider,
+ * so the NVIDIA host is a sensible default here (overridable by env). Nothing about any
+ * particular provider (hostnames, evidence field names) appears in this module.
  */
 
 /** NRAS v3 GPU attest endpoint. Overridable via ANTSEED_VERIFIER_NRAS_URL. */
@@ -29,15 +29,15 @@ export interface NrasEvidenceItem {
 
 /**
  * The provider-produced GPU evidence blob (rides the provider's evidence route). Generic:
- * `arch` (e.g. "HOPPER"/"BLACKWELL") and the per-GPU evidence come from the provider, never
- * hardcoded here. This is exactly the NRAS request body minus the buyer-supplied nonce.
+ * `arch` (e.g. "HOPPER" or "BLACKWELL") and the per-GPU evidence come from the provider, never
+ * hardcoded here. This is the NRAS request body minus the buyer-supplied nonce.
  */
 export interface NvidiaGpuEvidence {
   arch: string
   evidence_list: NrasEvidenceItem[]
 }
 
-/** The JSON body POSTed to NRAS. v3 renamed the old "evidences" field to "evidence_list". */
+/** The JSON body POSTed to NRAS (v3 uses the "evidence_list" field). */
 export interface NrasRequest {
   nonce: string
   arch: string
@@ -47,14 +47,14 @@ export interface NrasRequest {
 /** Injectable HTTP submit so tests never touch the network. Returns the parsed NRAS response. */
 export type NrasSubmitFn = (url: string, body: NrasRequest) => Promise<unknown>
 
-/** Structured EAR verdict — the caller renders a human detail + maps to a ClaimResult. */
+/** Structured EAR verdict — the caller renders a human detail and maps it to a ClaimResult. */
 export interface EarVerification {
   ok: boolean
   /** Reason string (why it failed, or a success summary). */
   reason: string
   /** Number of GPUs the EAR reported on (device token count). */
   gpuCount: number
-  /** CC-mode determination — see ccModeOf() for how this is derived and why it's fuzzy. */
+  /** CC-mode determination — see ccModeOf() for how it is derived and why it is fuzzy. */
   ccMode: 'enabled' | 'disabled' | 'implied'
 }
 
@@ -63,8 +63,8 @@ function isNonEmptyString(v: unknown): v is string {
 }
 
 /**
- * Build the NRAS request from provider evidence + the buyer's nonce. Fail-closed: throws on
- * anything malformed so a missing/garbage evidence blob can never reach NRAS as a valid ask.
+ * Build the NRAS request from provider evidence and the buyer's nonce. Fail-closed: it throws on
+ * anything malformed, so a missing or garbage evidence blob can never reach NRAS as a valid ask.
  * The nonce is the buyer's 32 raw bytes rendered as 64 lowercase hex chars (NRAS "32-byte Hex").
  */
 export function buildNrasRequest(evidence: NvidiaGpuEvidence, nonce: Uint8Array): NrasRequest {
@@ -83,7 +83,7 @@ export function buildNrasRequest(evidence: NvidiaGpuEvidence, nonce: Uint8Array)
   }
 }
 
-/** Default submit: POST JSON to NRAS with a hard timeout. Network / non-2xx errors bubble up (caller marks transient). */
+/** Default submit: POST JSON to NRAS with a hard timeout. Network or non-2xx errors bubble up (the caller marks them transient). */
 export const defaultNrasSubmit: NrasSubmitFn = async (url, body) => {
   const resp = await fetch(url, {
     method: 'POST',
@@ -98,12 +98,12 @@ export const defaultNrasSubmit: NrasSubmitFn = async (url, body) => {
 }
 
 /**
- * Extract the JWT strings from an NRAS response. NRAS has shipped two shapes and we tolerate
- * both (isolated here so a schema change is a one-line fix):
- *   - a bare JWT string (single-GPU / older responses)
+ * Extract the JWT strings from an NRAS response. NRAS uses two shapes, and this handles both
+ * (isolated here so a schema change is a one-line fix):
+ *   - a bare JWT string (single-GPU or older responses)
  *   - the v3 "detached EAR" bundle: a 2-element array [ mainToken, { "GPU-0": jwt, ... } ]
  *     where one element is the overall JWT and the other maps each device to its own JWT.
- * Returns the overall token (if any) plus the per-device tokens.
+ * It returns the overall token (if any) plus the per-device tokens.
  */
 export function extractEarTokens(resp: unknown): { overall?: string; devices: Record<string, string> } {
   if (isNonEmptyString(resp)) return { overall: resp, devices: {} }
@@ -125,10 +125,10 @@ export function extractEarTokens(resp: unknown): { overall?: string; devices: Re
 
 /**
  * Candidate per-device claim names that carry a confidential-compute signal. NVIDIA's EAT does
- * NOT document a single stable "cc-mode" boolean, so we check a documented candidate set rather
- * than invent one — the authoritative CC signal is that `x-nvidia-overall-att-result` is true
- * for evidence submitted to the /attest/gpu (CC) endpoint. This list is the ONE spot to extend
- * if NVIDIA names the claim explicitly. Keep it here so the policy in gpu-nvidia.ts stays clean.
+ * not document a single stable "cc-mode" boolean, so this checks a documented candidate set
+ * instead of inventing one. The authoritative CC signal is that `x-nvidia-overall-att-result`
+ * is true for evidence submitted to the /attest/gpu (CC) endpoint. Extend this list here if
+ * NVIDIA names the claim explicitly. It lives here so the policy in gpu-nvidia.ts stays clean.
  */
 const CC_MODE_CLAIM_CANDIDATES = [
   'x-nvidia-gpu-attestation-report-cc-mode',
@@ -163,14 +163,14 @@ function eatNonce(payload: JWTPayload): string | undefined {
 }
 
 /**
- * Verify the NRAS EAR against the buyer's nonce. Verifies EVERY JWT's signature against the
+ * Verify the NRAS EAR against the buyer's nonce. It verifies every JWT's signature against the
  * injected key resolver (NVIDIA JWKS in production, a test key in tests), then enforces:
- *   - overall attestation result is success (x-nvidia-overall-att-result === true; when only
+ *   - the overall attestation result is success (x-nvidia-overall-att-result === true; when only
  *     per-device tokens are present, every device's measres === "success")
  *   - eat_nonce binds this exact buyer nonce (checked on the overall token, else on every device)
  *   - CC mode is not explicitly disabled on any device
- * A bad signature / failed check is an attestation FAILURE (not transient). Never verifies with
- * a symmetric or "none" alg — jose derives the allowed alg from the resolved key.
+ * A bad signature or failed check is an attestation failure (not transient). It never verifies
+ * with a symmetric or "none" alg — jose derives the allowed alg from the resolved key.
  */
 export async function verifyEar(
   resp: unknown,
@@ -186,7 +186,7 @@ export async function verifyEar(
   const jose = await import('jose')
   const expectedNonce = Buffer.from(nonce).toString('hex')
 
-  // Verify signatures + collect payloads. jose throws on a bad signature or an unexpected alg.
+  // Verify signatures and collect payloads. jose throws on a bad signature or an unexpected alg.
   let overallPayload: JWTPayload | undefined
   const devicePayloads: JWTPayload[] = []
   try {
@@ -208,7 +208,7 @@ export async function verifyEar(
     : devicePayloads.length > 0 && devicePayloads.every((p) => eatNonce(p) === expectedNonce)
   if (!nonceMatches) return fail('NRAS EAR nonce does not match this attestation round')
 
-  // CC mode: reject only an EXPLICIT disable; otherwise trust the overall CC-endpoint result.
+  // CC mode: reject only an explicit disable; otherwise trust the overall CC-endpoint result.
   let ccMode: EarVerification['ccMode'] = 'implied'
   for (const p of devicePayloads) {
     const m = ccModeOf(p)

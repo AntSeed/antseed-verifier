@@ -1,29 +1,29 @@
 import { createHash } from 'node:crypto'
 
 /**
- * Compositional report_data schemes. A TDX quote has ONE 64-byte report_data; how a
- * provider commits this round's freshness (+ any TEE-bound key/payload) into it varies by
- * hardware stack. The SDK verifies against a CLOSED, version-pinned registry:
+ * Compositional report_data schemes. A TDX quote has one 64-byte report_data; how a
+ * provider commits this round's freshness (and any TEE-bound key or payload) into it varies by
+ * hardware stack. The SDK verifies against a closed, version-pinned registry:
  *
- *   - antseed-rd-v1           our canonical, COMPOSITIONAL scheme. nonce is always bound;
- *                             optional fields (peerId, e2ePubkey) are included iff their
- *                             ingredient is present, in canonical tag order, each tagged +
+ *   - antseed-rd-v1           the canonical, compositional scheme. The nonce is always bound;
+ *                             optional fields (peerId, e2ePubkey) are included only when their
+ *                             ingredient is present, in canonical tag order, each tagged and
  *                             length-prefixed. One rule covers every combination — the node
- *                             cap is the {peerId} case. New fields take a new tag + version bump.
- *   - nonce-pubkey-sha256-v1  a FOREIGN construction (e.g. Chutes) we do NOT control:
- *                             report_data[0:32] = SHA-256(nonce_hex ‖ e2ePubkey_b64). We
- *                             replicate its exact bytes only to VERIFY a quote it minted.
+ *                             cap is the {peerId} case. A new field takes a new tag and version bump.
+ *   - nonce-pubkey-sha256-v1  a foreign construction (e.g. Chutes) the SDK does not control:
+ *                             report_data[0:32] = SHA-256(nonce_hex ‖ e2ePubkey_b64). The SDK
+ *                             replicates its exact bytes only to verify a quote it minted.
  *
- * The same build() runs on the prover (to MINT report_data) and the buyer (to RECOMPUTE and
- * compare) — determinism is the safety property, and because the nonce is always bound, a
- * mis-declared/downgraded field set can only ever FAIL, never falsely pass. This registry is
+ * The same build() runs on the prover (to mint report_data) and the buyer (to recompute and
+ * compare). Determinism is the safety property, and because the nonce is always bound, a
+ * mis-declared or downgraded field set can only fail, never falsely pass. This registry is
  * frozen per SDK version; the trust registry pins the SDK, so prover and verifier agree.
  */
 
 export interface BindingIngredients {
   /** 40-hex EVM address — identity binding (the node cap's ingredient). */
   peerId?: string
-  /** base64 TEE-generated public key — E2E / signing providers. */
+  /** base64 TEE-generated public key — E2E or signing providers. */
   e2ePubkey?: string
   /** 32-byte (hex) digest of a provider's attested workload keyset — the ACI ingredient. */
   keysetDigest?: string
@@ -49,8 +49,9 @@ function lenPrefixed(b: Buffer): Buffer {
 }
 
 /**
- * Frozen field table for antseed-rd-v1. `tag` is the canonical ordering key AND a per-field
- * domain separator. Add a field → new tag + SDK version bump; never reorder or reuse a tag.
+ * Frozen field table for antseed-rd-v1. `tag` is the canonical ordering key and a per-field
+ * domain separator. To add a field, use a new tag and an SDK version bump; never reorder or
+ * reuse a tag.
  */
 const FIELDS: { tag: number; get: (i: BindingIngredients) => Buffer | null }[] = [
   { tag: 0x01, get: (i) => (i.peerId ? Buffer.from(i.peerId.toLowerCase(), 'hex') : null) },
@@ -61,7 +62,7 @@ export const antseedRdV1: ReportDataScheme = {
   id: RD_DOMAIN,
   compareLen: 64,
   build(nonce, ing) {
-    // Unambiguous TLV: fixed domain tag, then every value length-prefixed (incl. the nonce)
+    // Unambiguous TLV: fixed domain tag, then every value length-prefixed (including the nonce)
     // in fixed ascending field order, so no two distinct inputs share a preimage.
     const h = createHash('sha512')
     h.update(Buffer.from(RD_DOMAIN, 'utf8'))
@@ -75,7 +76,7 @@ export const antseedRdV1: ReportDataScheme = {
     return new Uint8Array(h.digest())
   },
   gpuNonce(nonce) {
-    return nonce // our GPU evidence binds the raw round nonce
+    return nonce // the GPU evidence binds the raw round nonce
   },
 }
 
@@ -85,8 +86,8 @@ export const noncePubkeySha256V1: ReportDataScheme = {
   build(nonce, ing) {
     if (!ing.e2ePubkey) throw new Error(`${this.id} requires e2ePubkey`)
     const commit = createHash('sha256')
-      .update(Buffer.from(nonce).toString('hex'), 'utf8') // nonce as its HEX string (their choice)
-      .update(ing.e2ePubkey, 'utf8') // pubkey as its BASE64 string (their choice)
+      .update(Buffer.from(nonce).toString('hex'), 'utf8') // nonce as its hex string (their choice)
+      .update(ing.e2ePubkey, 'utf8') // pubkey as its base64 string (their choice)
       .digest()
     const rd = Buffer.alloc(64) // [0:32] = commitment, [32:64] provider-defined
     commit.copy(rd, 0)
@@ -105,8 +106,8 @@ export const aciKeysetV1: ReportDataScheme = {
   compareLen: 64,
   build(nonce, ing) {
     // ACI (dstack) binds report_data = commitment(32) ‖ raw nonce(32); here the commitment is
-    // the SHA-256 digest of the attested workload keyset. Verified from private-ai-gateway's
-    // report.ts (computeReportData(digest, nonce)) + soundness_report_data.py.
+    // the SHA-256 digest of the attested workload keyset. Source: private-ai-gateway's report.ts
+    // (computeReportData(digest, nonce)) and soundness_report_data.py.
     if (!ing.keysetDigest) throw new Error(`${this.id} requires keysetDigest`)
     const digest = Buffer.from(ing.keysetDigest, 'hex')
     if (digest.length !== 32) throw new Error(`${this.id} keysetDigest must be 32 bytes (got ${digest.length})`)
@@ -132,8 +133,8 @@ export function getReportDataScheme(id: string): ReportDataScheme | undefined {
 }
 
 /**
- * Verify a quote's report_data against a frozen scheme. Returns null on match, else a reason.
- * Compares only the scheme's `compareLen` leading bytes (a provider may use the rest).
+ * Verify a quote's report_data against a frozen scheme. It returns null on a match, else a reason.
+ * It compares only the scheme's `compareLen` leading bytes (a provider may use the rest).
  */
 export function verifyReportData(
   schemeId: string,

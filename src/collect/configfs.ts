@@ -3,10 +3,10 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
 /**
- * Self-hosted TDX collector: mint a quote locally via the Linux configfs-TSM report
- * interface (kernel >= 6.7). Present inside a real Intel TDX guest (e.g. a GCP
- * confidential VM); absent elsewhere, so this throws off-TEE — which is how the
- * prover detects it cannot offer the tee-tdx capability via this source.
+ * Self-hosted TDX collector: it mints a quote locally via the Linux configfs-TSM report
+ * interface (kernel >= 6.7). The interface is present inside a real Intel TDX guest (e.g. a
+ * GCP confidential VM) and absent elsewhere, so this throws off-TEE. The prover uses that to
+ * detect it cannot offer the tee-tdx capability via this source.
  */
 const TSM_REPORT_DIR = '/sys/kernel/config/tsm/report'
 

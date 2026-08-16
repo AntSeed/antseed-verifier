@@ -4,9 +4,10 @@ import { SignJWT, generateKeyPair, type JWTVerifyGetKey } from 'jose'
 import { buildNrasRequest, extractEarTokens, verifyEar, type NvidiaGpuEvidence } from './nras.js'
 
 /**
- * Exercises the REAL EAR path — jose signature verification + claim extraction + nonce check —
- * against a fixture EAR we mint with a throwaway key, so NVIDIA/NRAS is never contacted. The
- * getKey resolver returns our public key (production returns NVIDIA's JWKS key for the same call).
+ * Exercise the real EAR path: jose signature verification, claim extraction, and nonce check.
+ * The test mints a fixture EAR with a throwaway key, so it never contacts NVIDIA NRAS. The
+ * getKey resolver returns the test public key. Production returns the NVIDIA JWKS key for the
+ * same call.
  */
 
 const NONCE = randomBytes(32)
@@ -15,7 +16,7 @@ const HEX = Buffer.from(NONCE).toString('hex')
 let priv: CryptoKey
 let pub: CryptoKey
 let otherPriv: CryptoKey
-/** Stand-in for createRemoteJWKSet: hands verifyEar our test public key. */
+/** Stand-in for createRemoteJWKSet. It hands verifyEar the test public key. */
 let getKey: JWTVerifyGetKey
 
 beforeAll(async () => {
@@ -24,7 +25,7 @@ beforeAll(async () => {
   getKey = (async () => pub) as unknown as JWTVerifyGetKey
 })
 
-/** Mint a JWT signed by `key` (defaults to our trusted test key). */
+/** Mint a JWT signed by `key`. Default is the trusted test key. */
 async function jwt(claims: Record<string, unknown>, key: CryptoKey = priv): Promise<string> {
   return new SignJWT(claims).setProtectedHeader({ alg: 'ES256' }).setIssuedAt().sign(key)
 }

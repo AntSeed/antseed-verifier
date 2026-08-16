@@ -6,13 +6,13 @@ import type { Capability, CapabilityCollectInput, CapabilityVerifyInput } from '
 import { bundleDigest, claimId, normalizePeerId, parseEvidenceConfigKey, sellerBoundPreimage } from '../shared.js'
 
 /**
- * Capability 'seller-bound': turns provider verification into SELLER verification. The
+ * Capability 'seller-bound': turns provider verification into seller verification. The
  * seller signs the seller-bound preimage (keccak256 over nonce ‖ bundleDigest ‖ peerId)
- * with its AntSeed identity key, where bundleDigest covers EVERY other cap's evidence
- * (the node quote AND the provider quote together). The buyer recovers the signer's EVM
- * address and requires it to equal the peer id. Freshness (nonce) + identity (peerId)
- * live entirely here, independent of what any quote's own report_data binds — so one
- * seller signature ties the whole bundle to this seller and this round.
+ * with its AntSeed identity key, where bundleDigest covers every other cap's evidence
+ * (the node quote and the provider quote together). The buyer recovers the signer's EVM
+ * address and requires it to equal the peer id. Freshness (nonce) and identity (peerId)
+ * live here, independent of what any quote's own report_data binds. One seller signature
+ * therefore ties the whole bundle to this seller and this round.
  */
 
 const CAP_ID = 'seller-bound'
@@ -31,7 +31,7 @@ export function recoverEvmAddress(digest: Uint8Array, sig: Uint8Array): string {
   return bytesToHex(keccak_256(uncompressed.subarray(1)).subarray(-20))
 }
 
-/** Build a signer over 32-byte digests from a hex private key, emitting r‖s‖v (v = 27/28). */
+/** Build a signer over 32-byte digests from a hex private key; it emits r‖s‖v (v = 27/28). */
 export function signerFromPrivateKey(privHex: string): (msg: Uint8Array) => Promise<Uint8Array> {
   const priv = hexToBytes(privHex.replace(/^0x/i, ''))
   if (priv.length !== 32) throw new Error(`private key must be 32 bytes, got ${priv.length}`)
@@ -85,9 +85,9 @@ export const sellerBoundCapability: Capability = {
 
   async collect(input: CapabilityCollectInput): Promise<Uint8Array> {
     if (!input.sign) throw new Error('seller-bound requires a signer (seller identity key); not offered')
-    // Rebuild the bundle from every OTHER cap's evidence the prover already collected this
-    // round (exposed as "evidence:<capId>" config entries). Must be collected last so the
-    // node + provider quotes are already present.
+    // Rebuild the bundle from every other cap's evidence the prover already collected this
+    // round (exposed as "evidence:<capId>" config entries). Collect it last, so the node and
+    // provider quotes are already present.
     const bundle: Record<string, Uint8Array> = {}
     for (const [key, b64] of Object.entries(input.config)) {
       const capId = parseEvidenceConfigKey(key)

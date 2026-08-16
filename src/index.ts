@@ -23,7 +23,7 @@ export type {
 } from './antseed-node-types.js'
 
 // Self-hosted TDX quote minting — for provider tooling that adopts antseed-rd-v1.
-// configfs-tsm (bare-metal / GCP TDX) and the dstack guest agent (Phala CVMs).
+// configfs-tsm (bare-metal or GCP TDX) and the dstack guest agent (Phala CVMs).
 export { generateTdxQuote } from './collect/configfs.js'
 export { generateDstackQuote } from './collect/dstack.js'
 
@@ -49,8 +49,8 @@ export {
 } from './caps/index.js'
 
 // Provider-claims: the SDK-frozen claims menu (the per-version claim definitions buyers
-// verify against) + the canonical provider report_data scheme (domain tag + the [0:32]
-// commitment provider tooling computes when binding a claims document into its TDX quote).
+// verify against) and the canonical provider report_data scheme (domain tag + the [0:32]
+// commitment provider tooling computes when it binds a claims document into its TDX quote).
 export {
   PROVIDER_CLAIMS_CAP_ID,
   PROVIDER_CLAIMS_MENU,
@@ -65,7 +65,7 @@ export type { ProviderClaimDefinition } from './caps/provider-claims.js'
 export { readMeasuredImagePolicy, readRequiredCaps } from './verifier.js'
 
 // Report_data binding schemes — the frozen registry the buyer verifies provider quotes against.
-// antseedRdV1 is our canonical compositional scheme (the node cap is its {peerId} instance);
+// antseedRdV1 is the canonical compositional scheme (the node cap is its {peerId} instance);
 // noncePubkeySha256V1 is the foreign Chutes construction, replicated only to verify their quotes.
 export {
   antseedRdV1,
@@ -84,7 +84,7 @@ export { loadAdapter, adapterIds } from './adapters/index.js'
 export type { ProviderAdapter, ProviderEvidence } from './adapters/index.js'
 export type { ReportDataBinding } from './caps/tee-tdx.js'
 
-// Buyer-side orchestration + the injectable DCAP seam (useful for tooling/tests).
+// Buyer-side orchestration and the injectable DCAP seam (useful for tooling and tests).
 export { runVerify } from './verifier.js'
 export {
   makeTdxCap,
@@ -97,7 +97,7 @@ export {
 export type { VerifyQuoteFn, RawTdxVerification, ParsedTdxQuote, TdMeasurements } from './caps/tee-tdx.js'
 export type { ApprovedMeasurement, MeasuredImagePolicy } from './caps/measured-image.js'
 
-// GPU-CC capability + its injectable buyer-side seam (NRAS now, offline local later).
+// GPU-CC capability and its injectable buyer-side seam (NRAS or offline local).
 export {
   makeGpuNvidiaCap,
   makeNrasGpuVerify,
@@ -114,7 +114,7 @@ export {
 } from './nras.js'
 export type { NvidiaGpuEvidence, NrasEvidenceItem, NrasRequest, NrasSubmitFn, EarVerification } from './nras.js'
 
-// Shared constants + helpers.
+// Shared constants and helpers.
 export {
   VERIFIER_ID,
   ATTEST_PATH,

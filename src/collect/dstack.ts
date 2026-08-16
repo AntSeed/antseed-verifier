@@ -1,11 +1,11 @@
 import { request } from 'node:http'
 
 /**
- * dstack collector: mint a TDX quote via the dstack guest-agent unix socket. This is the
+ * dstack collector: it mints a TDX quote via the dstack guest-agent unix socket. This is the
  * canonical quoting path inside dstack CVMs (e.g. Phala), where the Linux configfs-tsm
- * interface is not exposed. We POST our 64-byte report_data (hex) to GetQuote, which uses it
- * RAW (no hashing, max 64 bytes) — so the quote's report_data is byte-identical to the configfs
- * path and the buyer verifies it unchanged.
+ * interface is not exposed. It POSTs the 64-byte report_data (hex) to GetQuote, which uses it
+ * raw (no hashing, max 64 bytes). The quote's report_data is then byte-identical to the configfs
+ * path, and the buyer verifies it unchanged.
  *
  * Wire contract (POST http://dstack/GetQuote over the socket):
  *   request  { "report_data": "<hex, <=64 bytes>" }
@@ -20,7 +20,7 @@ function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-/** Connection-level failure (socket absent/refused) — try the next candidate rather than abort. */
+/** Connection-level failure (socket absent or refused) — try the next candidate, do not abort. */
 function isConnError(err: unknown): boolean {
   const code = (err as { code?: string } | undefined)?.code
   return code === 'ENOENT' || code === 'ECONNREFUSED' || code === 'EACCES'
@@ -52,8 +52,8 @@ function postUnix(socketPath: string, path: string, body: string): Promise<{ sta
 /**
  * Generate a raw Intel TDX quote bound to `reportData` (64 bytes) via the dstack guest agent.
  * `socketPath` overrides the default locations (e.g. a custom mount or the dstack simulator).
- * Throws when no socket answers or the agent errors — the prover treats that as "cannot offer
- * this source" and omits the capability, exactly like configfs off-TEE.
+ * It throws when no socket answers or the agent errors. The prover treats that as "cannot offer
+ * this source" and omits the capability, like configfs off-TEE.
  */
 export async function generateDstackQuote(reportData: Uint8Array, socketPath?: string): Promise<Uint8Array> {
   if (reportData.length !== 64) {
@@ -75,7 +75,7 @@ export async function generateDstackQuote(reportData: Uint8Array, socketPath?: s
       return new Uint8Array(quote)
     } catch (err) {
       lastErr = err
-      if (isConnError(err)) continue // this socket isn't there — try the next candidate
+      if (isConnError(err)) continue // this socket is not there — try the next candidate
       throw new Error(`dstack quote generation failed: ${msg(err)}`)
     }
   }

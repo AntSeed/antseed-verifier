@@ -1,8 +1,8 @@
 /**
- * Generic HTTP collector: fetch a TDX quote from a seller-configured attestation endpoint.
+ * Generic HTTP collector: it fetches a TDX quote from a seller-configured attestation endpoint.
  * Everything provider-specific (host, path, JSON location of the quote) comes from the caller
- * — no hardcoded hosts or schemas — so any HTTP attestation service wires up purely through
- * config. `urlTemplate`'s {nonce} placeholder is substituted with the hex nonce; `field` is a
+ * — no hardcoded hosts or schemas — so any HTTP attestation service wires up through config
+ * alone. The {nonce} placeholder in `urlTemplate` is replaced with the hex nonce. `field` is a
  * dot-path to the base64 quote in the response (e.g. "quote" or "data.quote").
  */
 
@@ -16,12 +16,12 @@ function pluck(obj: unknown, path: string): unknown {
   }, obj)
 }
 
-/** Hard timeout on an outbound evidence fetch — a hung/slow provider can't stall the round. */
+/** Hard timeout on an outbound evidence fetch — a hung or slow provider cannot stall the round. */
 const FETCH_TIMEOUT_MS = 20_000
-/** Reject an over-large declared response body so a hostile endpoint can't force an OOM parse. */
+/** Reject an over-large declared response body so a hostile endpoint cannot force an OOM parse. */
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
-/** Substitute {nonce}, fetch with a timeout + size guard, and parse JSON. */
+/** Replace {nonce}, fetch with a timeout and size guard, then parse JSON. */
 async function fetchAttestJson(urlTemplate: string, nonce: Uint8Array): Promise<unknown> {
   const url = urlTemplate.replace(/\{nonce\}/g, Buffer.from(nonce).toString('hex'))
   const resp = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
@@ -36,10 +36,9 @@ async function fetchAttestJson(urlTemplate: string, nonce: Uint8Array): Promise<
 }
 
 /**
- * Fetch the provider evidence route ONCE, returning the base64-decoded quote and, when a pubkey
- * field is named, the report_data-binding pubkey string. Single fetch so the quote and the
- * pubkey come from the same response — a two-fetch split could pair a quote with a different
- * instance's key.
+ * Fetch the provider evidence route once. It returns the base64-decoded quote and, when a pubkey
+ * field is named, the report_data-binding pubkey string. One fetch keeps the quote and the pubkey
+ * from the same response — a two-fetch split could pair a quote with a different instance's key.
  */
 export async function collectTdxAndPubkey(
   urlTemplate: string,
@@ -82,10 +81,10 @@ export async function collectViaHttp(
 }
 
 /**
- * Like collectViaHttp, but returns the extracted field re-encoded as JSON bytes instead of
- * base64-decoding it. WHY separate: the TDX path wants a lone base64 quote decoded to raw
- * bytes; the GPU path's field holds a STRUCTURED value (e.g. { arch, evidence_list }) whose
- * shape must survive intact to the NRAS submit, so we preserve it as JSON rather than decode.
+ * Like collectViaHttp, but it returns the extracted field re-encoded as JSON bytes instead of
+ * base64-decoding it. Why separate: the TDX path wants a lone base64 quote decoded to raw bytes;
+ * the GPU path's field holds a structured value (e.g. { arch, evidence_list }) whose shape must
+ * survive intact to the NRAS submit, so the code keeps it as JSON rather than decode it.
  */
 export async function collectJsonFieldViaHttp(
   urlTemplate: string,

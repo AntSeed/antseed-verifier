@@ -2,9 +2,10 @@ import type { ProviderAdapter, ProviderEvidence } from './index.js'
 import type { NvidiaGpuEvidence } from '../nras.js'
 
 /**
- * Chutes provider adapter (in-process). Chutes' evidence endpoint is Bearer-authed and returns an
- * ARRAY of instances; this adds the auth, picks one instance, decodes the base64 quote, and
- * reshapes the flat GPU evidence into the NRAS shape. Selected by ANTSEED_VERIFIER_PROVIDER_ADAPTER=chutes.
+ * Chutes provider adapter (in-process). The Chutes evidence endpoint needs Bearer auth and
+ * returns an array of instances. The adapter adds the auth, picks one instance, decodes the
+ * base64 quote, and reshapes the flat GPU evidence into the NRAS shape.
+ * ANTSEED_VERIFIER_PROVIDER_ADAPTER=chutes selects it.
  *
  * Env: CHUTES_API_KEY (required), CHUTES_CHUTE (required), CHUTES_API_BASE (default https://api.chutes.ai).
  */

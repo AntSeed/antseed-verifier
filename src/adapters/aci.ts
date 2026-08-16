@@ -1,9 +1,9 @@
 import type { ProviderAdapter, ProviderEvidence } from './index.js'
 
 /**
- * RedPill / ACI provider adapter (in-process). Fetches a fresh, nonce-bound attestation from a
- * Private-AI-Gateway (ACI spec) endpoint, extracts the TDX quote, and binds via aci-keyset-v1
- * (report_data = keysetDigest ‖ nonce). Selected by ANTSEED_VERIFIER_PROVIDER_ADAPTER=aci.
+ * RedPill / ACI provider adapter (in-process). It gets a fresh, nonce-bound attestation from a
+ * Private-AI-Gateway (ACI spec) endpoint, reads the TDX quote, and binds via aci-keyset-v1
+ * (report_data = keysetDigest ‖ nonce). ANTSEED_VERIFIER_PROVIDER_ADAPTER=aci selects it.
  *
  * Env: ACI_ATTESTATION_URL (required, e.g. https://<gateway>/v1/aci/attestation), ACI_API_KEY (optional Bearer).
  */
@@ -15,7 +15,7 @@ interface AciReport {
   attestation?: { evidence?: { quote?: string } }
 }
 
-/** Extract the 64-hex keyset digest from ACI's "sha256:<hex>" field. */
+/** Read the 64-hex keyset digest from ACI's "sha256:<hex>" field. */
 function keysetDigestHex(raw: unknown): string {
   if (typeof raw !== 'string') throw new Error('aci report missing workload_keyset_digest')
   const hex = raw.replace(/^sha256:/, '').toLowerCase()

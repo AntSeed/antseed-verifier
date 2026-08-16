@@ -1,8 +1,8 @@
 /**
  * The AntSeed plugin contract this SDK implements, vendored so the published package is
  * self-contained (no external type dependency, no peer dependency to build). These interfaces
- * mirror the AntSeed runtime's plugin surface, which loads this SDK's default/`prover` exports
- * structurally; keep them in sync if that contract changes.
+ * mirror the AntSeed runtime's plugin surface, which loads this SDK's default and `prover` exports
+ * structurally. Keep them in sync if that contract changes.
  */
 
 export interface AntseedPluginBase {
@@ -25,7 +25,7 @@ export interface VerifyResult {
   claims: ClaimResult[]
 }
 
-/** A request the verifier issues to the seller over the existing buyer↔seller comms. */
+/** A request the verifier sends to the seller over the existing buyer↔seller comms. */
 export interface SellerRequest {
   method: string
   path: string

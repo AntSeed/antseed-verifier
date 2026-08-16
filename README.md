@@ -1,9 +1,9 @@
 # @antseed/antseed-verifier
 
-Verifier SDK for AntSeed's pluggable verifier system (AIP-3). One package, two halves: a
-**buyer verifier** (default export) that challenges a seller and checks its Intel TDX
-attestation before routing paid requests, and an embedded **seller prover** (`prover` export,
-loaded with `--verifiers antseed-verifier`) that answers those challenges before provider
+Verifier SDK for AntSeed's pluggable verifier system (AIP-3). One package has two halves. A
+**buyer verifier** (default export) challenges a seller. It checks the seller's Intel TDX
+attestation before it routes paid requests. An embedded **seller prover** (`prover` export,
+loaded with `--verifiers antseed-verifier`) answers those challenges before provider
 matching and payment.
 
 ```ts
@@ -12,25 +12,25 @@ import verifier, { prover } from '@antseed/antseed-verifier'
 // prover   → named export   (type:'prover',  seller half)
 ```
 
-It attests a menu of independent **capabilities**, one claim each, namespaced
-`antseed-verifier:<capability>`. The seller offers only the caps its infrastructure supports;
-the buyer's verdict gates on two and reports the rest for policy. Provider differences are
-config only (generic `configfs` or `http` collectors) — the SDK carries no provider-specific
-hosts or schemas, and is self-contained (no peer dependencies).
+It attests a menu of independent **capabilities**. Each capability is one claim, namespaced
+`antseed-verifier:<capability>`. The seller offers only the capabilities that its infrastructure
+supports. The buyer's verdict gates on two capabilities and reports the others for policy.
+Provider differences are config only (generic `configfs` or `http` collectors). The SDK carries
+no provider-specific hosts or schemas, and it is self-contained (no peer dependencies).
 
 ## Capabilities
 
 | Capability | Proves | Verdict |
 |---|---|---|
-| `seller-node-tee-genuine` | the seller **node** runs in a genuine Intel TDX enclave (DCAP: PCK chain to Intel's root, acceptable TCB, TD10, debug off), its quote bound to this nonce + peerId | **required** |
-| `seller-bound` | the seller's identity key signed the whole evidence bundle for this fresh nonce (signer recovers to peerId) | **required** |
-| `seller-provider-tee-genuine` | the downstream inference **provider's** TEE is genuine TDX; also round-bound when a `report_data` scheme is declared | informational |
-| `seller-provider-gpu-cc` | the provider's GPUs run NVIDIA Confidential Computing (verified via NVIDIA NRAS, nonce-bound) | informational |
+| `seller-node-tee-genuine` | the seller **node** runs in a genuine Intel TDX enclave (DCAP: PCK chain to Intel's root, acceptable TCB, TD10, debug off); the quote binds to this nonce + peerId | **required** |
+| `seller-bound` | the seller's identity key signs the whole evidence bundle for this fresh nonce (the signer recovers to peerId) | **required** |
+| `seller-provider-tee-genuine` | the downstream inference **provider's** TEE is genuine TDX; also round-bound when the seller declares a `report_data` scheme | informational |
+| `seller-provider-gpu-cc` | the provider's GPUs run NVIDIA Confidential Computing (NVIDIA NRAS verifies it, nonce-bound) | informational |
 | `seller-provider-measured-image` | the provider quote's MRTD/RTMR match a buyer allow-list | informational |
-| `seller-provider-claims` | named provider claims against a frozen SDK menu; each `asserted` (self-vouched) or `tdx-quote` (TEE-attested) | informational |
+| `seller-provider-claims` | named provider claims against a frozen SDK menu; each claim is `asserted` (self-vouched) or `tdx-quote` (TEE-attested) | informational |
 
-The two required caps together prove: *a genuine Intel TDX seller node, minted fresh this
-round and cryptographically tied to the seller's marketplace identity.*
+The two required capabilities together prove one thing: *a genuine Intel TDX seller node,
+minted fresh this round and cryptographically tied to the seller's marketplace identity.*
 
 ## Params
 
@@ -50,11 +50,11 @@ The **prover** (seller) reads its config from the environment, never from buyer-
 | `ANTSEED_VERIFIER_PROVIDER_BINDING_SCHEME` | frozen `report_data` scheme the provider quote uses (`antseed-rd-v1` \| `nonce-pubkey-sha256-v1`) |
 | `ANTSEED_VERIFIER_PROVIDER_BINDING_PUBKEY_FIELD` | JSON field with the provider's base64 E2E pubkey (the scheme's ingredient) |
 
-The **buyer** needs no special hardware; optional policy knobs:
+The **buyer** needs no special hardware. Optional policy knobs:
 
 | Variable | Purpose |
 |---|---|
-| `ANTSEED_VERIFIER_REQUIRED_CAPS` | comma-separated caps that gate the overall `ok` (default `seller-node-tee-genuine,seller-bound`); e.g. a provenance buyer sets `seller-provider-tee-genuine,seller-bound` to require the downstream provider's TEE |
+| `ANTSEED_VERIFIER_REQUIRED_CAPS` | comma-separated capabilities that gate the overall `ok` (default `seller-node-tee-genuine,seller-bound`); for example, a provenance buyer sets `seller-provider-tee-genuine,seller-bound` to require the downstream provider's TEE |
 | `ANTSEED_VERIFIER_MEASURED_IMAGE_POLICY` | approved-measurement allow-list (inline JSON or `@/path.json`) for `measured-image` |
 | `ANTSEED_VERIFIER_STRICT_TCB` | `true` requires TCB exactly `UpToDate` (default also accepts `SWHardeningNeeded`) |
 | `ANTSEED_VERIFIER_NRAS_URL` / `_NRAS_JWKS_URL` | override NVIDIA NRAS endpoints for `gpu-cc` |
@@ -66,20 +66,20 @@ report_data, so the buyer verifies them identically.
 
 ## Appendix — provider adapters
 
-A provider whose evidence API doesn't match the generic route (auth, a different response shape)
-is bridged by an **in-process adapter**, selected by `ANTSEED_VERIFIER_PROVIDER_ADAPTER` — no
-separate process. The SDK core stays provider-neutral; each adapter is an isolated, lazily-loaded
-module. Two ship today:
+An **in-process adapter** bridges a provider whose evidence API does not match the generic route
+(auth, a different response shape). Select the adapter with `ANTSEED_VERIFIER_PROVIDER_ADAPTER`.
+There is no separate process. The SDK core stays provider-neutral. Each adapter is an isolated
+module that loads lazily. Two adapters are available:
 
 ```bash
 export ANTSEED_VERIFIER_PROVIDER_ADAPTER=chutes   # + CHUTES_API_KEY, CHUTES_CHUTE
 export ANTSEED_VERIFIER_PROVIDER_ADAPTER=aci      # + ACI_ATTESTATION_URL (RedPill / dstack ACI)
 ```
 
-The adapter fetches the provider's fresh, nonce-bound quote and declares its frozen `report_data`
-scheme (`nonce-pubkey-sha256-v1` for Chutes, `aci-keyset-v1` for ACI), which the buyer verifies
-unchanged. Full setup: [CHUTES.md](./CHUTES.md) · [REDPILL.md](./REDPILL.md) · [PHALA.md](./PHALA.md)
-(running the seller node in a dstack TDX CVM).
+The adapter fetches the provider's fresh, nonce-bound quote. It declares its frozen `report_data`
+scheme (`nonce-pubkey-sha256-v1` for Chutes, `aci-keyset-v1` for ACI). The buyer verifies the
+scheme unchanged. Full setup: [CHUTES.md](./CHUTES.md) · [REDPILL.md](./REDPILL.md) · [PHALA.md](./PHALA.md)
+(run the seller node in a dstack TDX CVM).
 
 ---
 

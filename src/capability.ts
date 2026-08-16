@@ -1,11 +1,10 @@
 import type { ClaimResult } from './antseed-node-types.js'
 
 /**
- * A Capability is one independent seller attestation. The SDK offers a menu of them;
- * a seller produces evidence for the caps its infra supports (collect), and a buyer
- * verifies each one (verify) into a single ClaimResult. Caps are deliberately generic
- * — no provider hostnames/schemas — provider differences live only in config-driven
- * collectors.
+ * A Capability is one independent seller attestation. The SDK offers a menu of them.
+ * A seller produces evidence for the caps its infra supports (collect), and a buyer
+ * verifies each one (verify) into a single ClaimResult. Caps are generic — no provider
+ * hostnames or schemas. Provider differences live only in config-driven collectors.
  */
 
 /** Input to a capability's buyer-side check. */
@@ -45,7 +44,7 @@ export interface Capability {
   id: string
   /** Most caps yield one ClaimResult; a granular cap (provider-claims) yields one per sub-claim. */
   verify(input: CapabilityVerifyInput): ClaimResult | ClaimResult[] | Promise<ClaimResult | ClaimResult[]>
-  /** Present only for caps a seller can produce evidence for. Throwing means "not offered". */
+  /** Present only for caps a seller can produce evidence for. A throw means "not offered". */
   collect?(input: CapabilityCollectInput): Promise<Uint8Array>
 }
 

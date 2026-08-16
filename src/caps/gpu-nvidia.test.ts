@@ -19,7 +19,7 @@ const NONCE = randomBytes(32)
 const HEX = Buffer.from(NONCE).toString('hex')
 const EVIDENCE = new Uint8Array([1, 2, 3])
 
-/** Build a cap with an injected GpuVerifyFn stub and verify one round (evidence present). */
+/** Build a cap with a stub GpuVerifyFn and run one verify round. Evidence is present. */
 function verifyWith(stub: GpuVerifyFn, evidence: Uint8Array = EVIDENCE) {
   return makeGpuNvidiaCap(stub).verify({ nonce: NONCE, peerId: 'a'.repeat(40), evidence })
 }
@@ -48,7 +48,7 @@ describe('seller-provider-gpu-cc cap (injected GpuVerifyFn)', () => {
 
   it('fails closed on missing evidence WITHOUT invoking the verifier', async () => {
     const stub = vi.fn<GpuVerifyFn>(async () => ({ ok: true, detail: 'should not run' }))
-    // Build the input directly so evidence is genuinely absent (a default param would mask it).
+    // Build the input directly so evidence is absent. A default parameter would mask it.
     const r = await makeGpuNvidiaCap(stub).verify({ nonce: NONCE, peerId: 'a'.repeat(40) })
     expect(r.ok).toBe(false)
     expect(r.detail).toMatch(/no GPU CC evidence/)
@@ -135,9 +135,10 @@ describe('collect (evidence off the provider route)', () => {
 })
 
 /**
- * End-to-end NRAS seam WITHOUT the network: real evidence blob → buildNrasRequest → injected
- * submit → real jose EAR verification (test key). Proves the submit is mockable and the request
- * shape is correct, while exercising the genuine signature/claim/nonce path.
+ * Exercise the NRAS seam without the network. A real evidence blob passes through
+ * buildNrasRequest, the injected submit, and real jose EAR verification with a test key.
+ * This proves the submit is mockable and the request shape is correct, and it exercises
+ * the real signature, claim, and nonce path.
  */
 describe('makeNrasGpuVerify (injected submit + getKey)', () => {
   let priv: CryptoKey
