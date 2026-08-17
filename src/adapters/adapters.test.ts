@@ -117,7 +117,7 @@ describe('aci adapter', () => {
     const ev = await adapter.fetchEvidence(NONCE, { ACI_ATTESTATION_URL: `${stub.base}/v1/aci/attestation` })
     expect(Buffer.from(ev.quote).equals(quoteBytes)).toBe(true)
     expect(ev.bindingScheme).toBe('aci-keyset-v1')
-    expect(ev.ingredients?.keysetDigest).toBe(digest)
+    expect(ev.ingredients?.keysetDigest).toBe(`sha256:${digest}`)
   })
 
   it('throws when ACI_ATTESTATION_URL is missing', async () => {

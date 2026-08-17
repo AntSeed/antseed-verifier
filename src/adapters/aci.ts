@@ -2,8 +2,8 @@ import type { ProviderAdapter, ProviderEvidence } from './index.js'
 
 /**
  * RedPill / ACI provider adapter (in-process). It gets a fresh, nonce-bound attestation from a
- * Private-AI-Gateway (ACI spec) endpoint, reads the TDX quote, and binds via aci-keyset-v1
- * (report_data = keysetDigest ‖ nonce). ANTSEED_VERIFIER_PROVIDER_ADAPTER=aci selects it.
+ * Private-AI-Gateway (ACI spec) endpoint, reads the TDX quote, and binds via aci-keyset-v1.
+ * ANTSEED_VERIFIER_PROVIDER_ADAPTER=aci selects it.
  *
  * Env: ACI_ATTESTATION_URL (required, e.g. https://<gateway>/v1/aci/attestation), ACI_API_KEY (optional Bearer).
  */
@@ -15,12 +15,12 @@ interface AciReport {
   attestation?: { evidence?: { quote?: string } }
 }
 
-/** Read the 64-hex keyset digest from ACI's "sha256:<hex>" field. */
-function keysetDigestHex(raw: unknown): string {
-  if (typeof raw !== 'string') throw new Error('aci report missing workload_keyset_digest')
-  const hex = raw.replace(/^sha256:/, '').toLowerCase()
-  if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error('aci workload_keyset_digest is not "sha256:<64 hex>"')
-  return hex
+/** Validate ACI's workload_keyset_digest ("sha256:<64 hex>") and return it verbatim. */
+function keysetDigest(raw: unknown): string {
+  if (typeof raw !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(raw)) {
+    throw new Error('aci report workload_keyset_digest is not "sha256:<64 hex>"')
+  }
+  return raw
 }
 
 async function fetchEvidence(nonce: Uint8Array, env: Record<string, string | undefined>): Promise<ProviderEvidence> {
@@ -44,7 +44,7 @@ async function fetchEvidence(nonce: Uint8Array, env: Record<string, string | und
   return {
     quote: new Uint8Array(Buffer.from(quoteHex.replace(/^0x/, ''), 'hex')),
     bindingScheme: 'aci-keyset-v1',
-    ingredients: { keysetDigest: keysetDigestHex(report.workload_keyset_digest) },
+    ingredients: { keysetDigest: keysetDigest(report.workload_keyset_digest) },
   }
 }
 

@@ -25,7 +25,7 @@ export interface BindingIngredients {
   peerId?: string
   /** base64 TEE-generated public key — E2E or signing providers. */
   e2ePubkey?: string
-  /** 32-byte (hex) digest of a provider's attested workload keyset — the ACI ingredient. */
+  /** ACI workload keyset digest, "sha256:<64 hex>" — the ACI ingredient. */
   keysetDigest?: string
 }
 
@@ -103,18 +103,18 @@ export const noncePubkeySha256V1: ReportDataScheme = {
 
 export const aciKeysetV1: ReportDataScheme = {
   id: 'aci-keyset-v1',
-  compareLen: 64,
+  compareLen: 32,
   build(nonce, ing) {
-    // ACI (dstack) binds report_data = commitment(32) ‖ raw nonce(32); here the commitment is
-    // the SHA-256 digest of the attested workload keyset. Source: private-ai-gateway's report.ts
-    // (computeReportData(digest, nonce)) and soundness_report_data.py.
-    if (!ing.keysetDigest) throw new Error(`${this.id} requires keysetDigest`)
-    const digest = Buffer.from(ing.keysetDigest, 'hex')
-    if (digest.length !== 32) throw new Error(`${this.id} keysetDigest must be 32 bytes (got ${digest.length})`)
+    // ACI report_data (private-ai-gateway digest.ts): SHA-256 of a fixed statement over the
+    // workload keyset digest and the nonce, which the TEE places zero-padded to 64 in the quote.
+    const digest = ing.keysetDigest
+    if (!digest || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
+      throw new Error(`${this.id} requires keysetDigest "sha256:<64 hex>"`)
+    }
     if (nonce.length !== 32) throw new Error(`${this.id} requires a 32-byte nonce`)
+    const statement = `{"keyset_digest":"${digest}","nonce":"${Buffer.from(nonce).toString('hex')}","purpose":"aci.report_data.v1"}`
     const rd = Buffer.alloc(64)
-    digest.copy(rd, 0)
-    Buffer.from(nonce).copy(rd, 32)
+    createHash('sha256').update(statement, 'utf8').digest().copy(rd, 0)
     return new Uint8Array(rd)
   },
   gpuNonce(nonce) {
