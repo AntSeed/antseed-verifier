@@ -116,3 +116,20 @@ describe('prover — in-process provider adapter', () => {
     expect(evidence[PROVIDER_TEE]).toBeUndefined()
   })
 })
+
+describe('prover — collection summary log', () => {
+  it('logs which caps collected evidence and which were skipped', async () => {
+    // node-tee has no configfs in the test env, so it is skipped; provider-tee collects via the stub.
+    const spy = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    let summary: string | undefined
+    try {
+      await attest(['seller-node-tee-genuine', PROVIDER_TEE])
+      summary = spy.mock.calls.map((c) => String(c[0])).find((w) => w.includes('attest: collected'))
+    } finally {
+      spy.mockRestore()
+    }
+    expect(summary).toBeDefined()
+    expect(summary).toMatch(/collected \[[^\]]*seller-provider-tee-genuine/)
+    expect(summary).toMatch(/skipped \[[^\]]*seller-node-tee-genuine/)
+  })
+})

@@ -1,6 +1,6 @@
 import type { Prover, SellerRequest, SellerResponse } from './antseed-node-types.js'
 import './caps/index.js' // side-effect: register the capability menu
-import { listCapabilities } from './capability.js'
+import { getCapability, listCapabilities } from './capability.js'
 import { evmAddressFromPrivateKey, signerFromPrivateKey } from './caps/seller-bound.js'
 import { NODE_TEE_CAP_ID, PROVIDER_TEE_CAP_ID, encodeTeeTdxEvidence, tdxConfigKey } from './caps/tee-tdx.js'
 import { GPU_CAP_ID, gpuConfigKey } from './caps/gpu-nvidia.js'
@@ -204,6 +204,14 @@ const prover: Prover = {
         process.stderr.write(`[${VERIFIER_ID}] capability "${cap.id}" not offered: ${msg(err)}\n`)
       }
     }
+
+    // One-line collection summary, so the seller sees which caps produced evidence this round.
+    const collected = Object.keys(evidence)
+    const skipped = caps.filter((id) => !evidence[id] && getCapability(id)?.collect)
+    process.stderr.write(
+      `[${VERIFIER_ID}] attest: collected [${collected.join(', ')}]`
+      + (skipped.length ? `; skipped [${skipped.join(', ')}]` : '') + '\n',
+    )
 
     return { statusCode: 200, headers: { 'content-type': 'application/json' }, body: encodeAttestResponse(evidence) }
   },
