@@ -97,24 +97,31 @@ export const defaultNrasSubmit: NrasSubmitFn = async (url, body) => {
   return resp.json()
 }
 
+/** Unwrap NRAS v3's ["JWT", token] content-type pair to the token; pass a bare string through. */
+function jwtOf(v: unknown): string | undefined {
+  if (isNonEmptyString(v)) return v
+  if (Array.isArray(v) && v[0] === 'JWT' && isNonEmptyString(v[1])) return v[1]
+  return undefined
+}
+
 /**
- * Extract the JWT strings from an NRAS response. NRAS uses two shapes, and this handles both
- * (isolated here so a schema change is a one-line fix):
- *   - a bare JWT string (single-GPU or older responses)
- *   - the v3 "detached EAR" bundle: a 2-element array [ mainToken, { "GPU-0": jwt, ... } ]
- *     where one element is the overall JWT and the other maps each device to its own JWT.
- * It returns the overall token (if any) plus the per-device tokens.
+ * Extract the JWT strings from an NRAS response. Handles a bare JWT string, and the v3 detached
+ * EAR array [ overall, { "GPU-0": jwt, ... } ] where each token may be wrapped as a
+ * ["JWT", token] content-type pair. Returns the overall token (if any) plus per-device tokens.
  */
 export function extractEarTokens(resp: unknown): { overall?: string; devices: Record<string, string> } {
-  if (isNonEmptyString(resp)) return { overall: resp, devices: {} }
+  const bare = jwtOf(resp)
+  if (bare) return { overall: bare, devices: {} }
   if (Array.isArray(resp)) {
     let overall: string | undefined
     const devices: Record<string, string> = {}
     for (const el of resp) {
-      if (isNonEmptyString(el)) overall = el
-      else if (el && typeof el === 'object') {
+      const tok = jwtOf(el)
+      if (tok) { overall = tok; continue }
+      if (el && typeof el === 'object') {
         for (const [k, v] of Object.entries(el as Record<string, unknown>)) {
-          if (isNonEmptyString(v)) devices[k] = v
+          const dt = jwtOf(v)
+          if (dt) devices[k] = dt
         }
       }
     }
