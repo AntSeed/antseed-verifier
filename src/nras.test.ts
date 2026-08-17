@@ -64,6 +64,11 @@ describe('extractEarTokens', () => {
     const swapped = extractEarTokens([{ 'GPU-0': 'd.e.f' }, 'a.b.c'])
     expect(swapped).toEqual({ overall: 'a.b.c', devices: { 'GPU-0': 'd.e.f' } })
   })
+  it('unwraps NRAS v3 ["JWT", token] content-type pairs', () => {
+    const r = extractEarTokens([['JWT', 'a.b.c'], { 'GPU-0': ['JWT', 'd.e.f'], 'GPU-1': 'g.h.i' }])
+    expect(r.overall).toBe('a.b.c')
+    expect(r.devices).toEqual({ 'GPU-0': 'd.e.f', 'GPU-1': 'g.h.i' })
+  })
   it('throws on an unrecognized shape', () => {
     expect(() => extractEarTokens({ nope: 1 })).toThrow(/unrecognized/)
   })
@@ -85,6 +90,14 @@ describe('verifyEar', () => {
     expect(r.ok).toBe(true)
     expect(r.gpuCount).toBe(2)
     expect(r.reason).toMatch(/2 NVIDIA GPUs.*NRAS-verified/)
+  })
+
+  it('passes when NRAS v3 wraps the tokens as ["JWT", token] pairs', async () => {
+    const overall = await jwt({ 'x-nvidia-overall-att-result': true, eat_nonce: HEX })
+    const device = await jwt({ measres: 'success', eat_nonce: HEX })
+    const r = await verifyEar([['JWT', overall], { 'GPU-0': ['JWT', device] }], NONCE, getKey)
+    expect(r.ok).toBe(true)
+    expect(r.gpuCount).toBe(1)
   })
 
   it('reports CC mode enabled when a device carries an explicit cc-mode claim', async () => {
