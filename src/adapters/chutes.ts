@@ -2,9 +2,11 @@ import type { ProviderAdapter, ProviderEvidence } from './index.js'
 import type { NvidiaGpuEvidence } from '../nras.js'
 
 /**
- * Chutes provider adapter (in-process). The Chutes evidence endpoint needs Bearer auth and
- * returns an array of instances. The adapter adds the auth, picks one instance, decodes the
- * base64 quote, and reshapes the flat GPU evidence into the NRAS shape.
+ * Chutes provider adapter (in-process). Chutes splits the evidence across two Bearer-authed
+ * endpoints. `/e2e/instances/{chute}` returns the per-instance E2E pubkey (the report_data
+ * ingredient). `/chutes/{chute}/evidence?nonce={hex}` returns the per-instance TDX quote and
+ * GPU evidence, bound to the nonce. The adapter joins them by instance_id, decodes the base64
+ * quote, and reshapes the flat GPU evidence into the NRAS shape.
  * ANTSEED_VERIFIER_PROVIDER_ADAPTER=chutes selects it.
  *
  * Env: CHUTES_API_KEY (required), CHUTES_CHUTE (required), CHUTES_API_BASE (default https://api.chutes.ai).
@@ -13,10 +15,11 @@ import type { NvidiaGpuEvidence } from '../nras.js'
 const DEFAULT_BASE = 'https://api.chutes.ai'
 const TIMEOUT_MS = 20_000
 
-interface ChutesInstance {
-  quote?: string
-  e2e_pubkey?: string
-  gpu_evidence?: unknown
+interface InstancesResponse {
+  instances?: { instance_id?: string; e2e_pubkey?: string }[]
+}
+interface EvidenceResponse {
+  evidence?: { instance_id?: string; quote?: string; gpu_evidence?: unknown }[]
 }
 
 /** Reshape Chutes' flat GPU evidence [{arch, evidence, certificate}] → NRAS { arch, evidence_list }. */
@@ -42,21 +45,34 @@ async function fetchEvidence(nonce: Uint8Array, env: Record<string, string | und
   const chute = env['CHUTES_CHUTE']
   if (!key) throw new Error('CHUTES_API_KEY is required')
   if (!chute) throw new Error('CHUTES_CHUTE is required')
+  const headers = { authorization: `Bearer ${key}` }
+  const chuteEnc = encodeURIComponent(chute)
 
+  const get = async (path: string): Promise<unknown> => {
+    const resp = await fetch(`${base}${path}`, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) })
+    if (!resp.ok) throw new Error(`chutes ${path.split('?')[0]} HTTP ${resp.status}`)
+    return resp.json()
+  }
+
+  // E2E pubkey per instance (the report_data binding ingredient).
+  const instBody = (await get(`/e2e/instances/${chuteEnc}`)) as InstancesResponse
+  const pubkeys = new Map<string, string>()
+  for (const i of instBody.instances ?? []) {
+    if (i.instance_id && typeof i.e2e_pubkey === 'string' && i.e2e_pubkey.length > 0) pubkeys.set(i.instance_id, i.e2e_pubkey)
+  }
+
+  // TDX quote and GPU evidence per instance, bound to this nonce.
   const nonceHex = Buffer.from(nonce).toString('hex')
-  const url = `${base}/chutes/${encodeURIComponent(chute)}/evidence?nonce=${nonceHex}`
-  const resp = await fetch(url, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(TIMEOUT_MS) })
-  if (!resp.ok) throw new Error(`chutes evidence HTTP ${resp.status}`)
-
-  const body = (await resp.json()) as unknown
-  const instances = (Array.isArray(body) ? body : [body]) as ChutesInstance[]
-  const inst = instances.find((i) => typeof i?.quote === 'string' && i.quote.length > 0)
-  if (!inst?.quote) throw new Error('no chutes instance returned a quote')
+  const evBody = (await get(`/chutes/${chuteEnc}/evidence?nonce=${nonceHex}`)) as EvidenceResponse
+  const inst = (evBody.evidence ?? []).find(
+    (e) => typeof e.quote === 'string' && e.quote.length > 0 && !!e.instance_id && pubkeys.has(e.instance_id),
+  )
+  if (!inst?.quote || !inst.instance_id) throw new Error('no chutes instance had both a quote and an e2e_pubkey')
 
   const evidence: ProviderEvidence = {
     quote: new Uint8Array(Buffer.from(inst.quote, 'base64')),
     bindingScheme: 'nonce-pubkey-sha256-v1',
-    ingredients: { e2ePubkey: inst.e2e_pubkey },
+    ingredients: { e2ePubkey: pubkeys.get(inst.instance_id) },
   }
   const gpu = reshapeGpu(inst.gpu_evidence)
   if (gpu) evidence.gpuEvidence = gpu
